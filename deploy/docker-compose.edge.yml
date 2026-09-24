@@ -1,0 +1,16 @@
+# Saloni behind a reverse proxy that already owns ports 80/443 on this VPS (e.g. another project's Caddy).
+# Used automatically by the scripts when deploy/.env sets SALONI_EDGE_NETWORK (install.sh detects it).
+# Saloni's own Caddy is not started; the API joins the existing proxy's Docker network under the
+# alias "saloni-api", and that proxy gets a site block: reverse_proxy saloni-api:3000.
+services:
+  server:
+    networks:
+      default: {}
+      edge:
+        aliases:
+          - saloni-api
+
+networks:
+  edge:
+    external: true
+    name: ${SALONI_EDGE_NETWORK:?SALONI_EDGE_NETWORK missing}

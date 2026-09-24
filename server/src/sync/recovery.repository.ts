@@ -3,6 +3,18 @@ import type { TenantContext, TenantQueryable } from '../tenancy/tenant-context';
 
 export interface RecoveredEventItem {
   id: string;
+  /**
+   * `recovered`: uploaded by a manager from a suspended account's device (ق40);
+   * `during_suspension`: synced normally after reactivation but done while suspended (review F2).
+   */
+  kind: 'recovered' | 'during_suspension';
+  /**
+   * `applied`, or `not_applied_uncertain_time` (review F1): its device time was approximate, so it
+   * was NOT applied — the manager records it by hand if it really happened.
+   */
+  status: 'applied' | 'not_applied_uncertain_time';
+  /** Known payload fields (amount, serviceIds, steps, decision, reason, kind, durationMin). */
+  payloadSummary: Record<string, unknown>;
   staffId: string;
   staffName: string | null;
   eventId: string | null;
@@ -12,6 +24,8 @@ export interface RecoveredEventItem {
   occurredAt: string | null;
   approximate: boolean;
   suspendedAt: string | null;
+  /** during_suspension: when the account was reactivated (null if still open). */
+  reactivatedAt: string | null;
   reason: string | null;
   recoveredBy: { id: string; name: string | null } | null;
   recoveredAt: string;
@@ -37,7 +51,10 @@ interface Row {
 
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 
-/** ق40: events a manager recovered for a suspended account, pending review (`sync_conflicts` rows). */
+/**
+ * ق40: events a manager recovered for a suspended account (applied, or kept unapplied for an
+ * uncertain time) and events done while an account was suspended — pending review (`sync_conflicts` rows).
+ */
 export const RecoveryRepo = {
   async list(q: TenantQueryable, all: boolean): Promise<RecoveredEventItem[]> {
     const { rows } = await q.query<Row>(
@@ -58,6 +75,9 @@ export const RecoveryRepo = {
     );
     return rows.map((r) => ({
       id: r.id,
+      kind: r.details.source === 'during_suspension' ? 'during_suspension' : 'recovered',
+      status: r.details.status === 'not_applied_uncertain_time' ? 'not_applied_uncertain_time' : 'applied',
+      payloadSummary: r.details.payloadSummary && typeof r.details.payloadSummary === 'object' ? (r.details.payloadSummary as Record<string, unknown>) : {},
       staffId: r.staff_id,
       staffName: r.staff_name,
       eventId: r.device_event_id,
@@ -67,6 +87,7 @@ export const RecoveryRepo = {
       occurredAt: str(r.details.occurredAt),
       approximate: r.details.approximate === true,
       suspendedAt: str(r.details.suspendedAt),
+      reactivatedAt: str(r.details.reactivatedAt),
       reason: str(r.details.reason),
       recoveredBy: r.recoverer_id ? { id: r.recoverer_id, name: r.recoverer_name } : null,
       recoveredAt: r.created_at.toISOString(),

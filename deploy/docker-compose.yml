@@ -28,7 +28,7 @@ services:
       retries: 30
 
   pgbouncer:
-    image: edoburu/pgbouncer:latest
+    image: edoburu/pgbouncer:v1.25.2-p0
     restart: unless-stopped
     logging: *logging
     depends_on:
@@ -98,6 +98,8 @@ services:
 
   caddy:
     image: caddy:2-alpine
+    # Started only when Saloni owns 80/443 (see _common.sh / docker-compose.edge.yml).
+    profiles: ["own-proxy"]
     restart: unless-stopped
     logging: *logging
     depends_on:

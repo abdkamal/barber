@@ -15,11 +15,13 @@ set -euo pipefail
 REPO_URL="${SALONI_REPO:-https://github.com/abdkamal/barber.git}"
 BRANCH="claude/ecstatic-wozniak-fn1302"
 DOMAIN_ARG="${SALONI_DOMAIN:-}"
+ASSUME_YES="${SALONI_ASSUME_YES:-0}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --domain) DOMAIN_ARG="${2:-}"; shift 2 ;;
     --domain=*) DOMAIN_ARG="${1#*=}"; shift ;;
+    --yes|-y) ASSUME_YES=1; shift ;;
     -h|--help) echo "usage: sudo bash deploy/install.sh [BRANCH] [--domain api.example.com]"; exit 0 ;;
     -*) echo "خيار غير معروف: $1" >&2; exit 1 ;;
     *) BRANCH="$1"; shift ;;
@@ -62,6 +64,7 @@ if [ -z "$FOUND" ]; then
     echo "    (إن طُلب Username/Password: اسمك في GitHub، ثم «رمز وصول» Personal Access Token بدل كلمة المرور)"
     git clone --branch "$BRANCH" "$REPO_URL" "$TARGET"
   fi
+  export SALONI_ASSUME_YES="$ASSUME_YES"
   if [ -n "$DOMAIN_ARG" ]; then
     exec bash "$TARGET/deploy/install.sh" "$BRANCH" --domain "$DOMAIN_ARG"
   fi
@@ -132,6 +135,29 @@ if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: a
   ok "فُتح المنفذان 80 و443 في الجدار الناري ufw"
 fi
 
+# ---- 4b. Another proxy already owns port 80/443? → run behind it (edge mode) --------------------
+# e.g. a Caddy container of another project on this VPS. Saloni's own Caddy is then not started;
+# the API joins that proxy's Docker network as "saloni-api" and the proxy gets one extra site block.
+OWN_CADDY="$(docker ps -q --filter label=com.docker.compose.project=saloni --filter label=com.docker.compose.service=caddy)"
+EDGE_C="$(env_get SALONI_EDGE_CONTAINER)"
+if [ -z "$EDGE_C" ] && [ -z "$OWN_CADDY" ]; then
+  EDGE_C="$(docker ps --filter publish=80 --format '{{.Names}}' | head -n 1)"
+  if [ -z "$EDGE_C" ] && command -v ss >/dev/null 2>&1 && ss -ltnH '( sport = :80 )' | grep -q .; then
+    die "المنفذ 80 مشغول ببرنامج خارج Docker ($(ss -ltnpH '( sport = :80 )' | grep -o 'users:(("[^"]*' | head -n1 | cut -d'"' -f2)). أرسل هذه الرسالة للمطوّر."
+  fi
+fi
+if [ -n "$EDGE_C" ]; then
+  docker inspect "$EDGE_C" >/dev/null 2>&1 || die "الوكيل $EDGE_C المسجّل في deploy/.env غير موجود."
+  EDGE_IMAGE="$(docker inspect --format '{{.Config.Image}}' "$EDGE_C")"
+  case "$EDGE_IMAGE" in *caddy*) ;; *) die "المنفذ 80 يستخدمه $EDGE_C ($EDGE_IMAGE) وليس Caddy. أرسل هذه الرسالة للمطوّر ليجهّز الربط معه." ;; esac
+  EDGE_NET="$(docker inspect --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' "$EDGE_C" | grep -vxE 'bridge|host|none' | head -n 1 || true)"
+  [ -n "$EDGE_NET" ] || die "الوكيل $EDGE_C على شبكة Docker الافتراضية فقط؛ لا يمكن الربط تلقائيًا. أرسل هذه الرسالة للمطوّر."
+  set_var SALONI_EDGE_CONTAINER "$EDGE_C"
+  set_var SALONI_EDGE_NETWORK "$EDGE_NET"
+  ok "يوجد وكيل يملك المنفذين 80/443: $EDGE_C — سيعمل صالوني خلفه (شبكة $EDGE_NET) دون المساس بمواقعك"
+  docker rm -f saloni-caddy-1 >/dev/null 2>&1 || true
+fi
+
 # ---- 5. Build + start --------------------------------------------------------------------------
 say "بناء السيرفر (3–10 دقائق في المرة الأولى)…"
 dc build server
@@ -146,6 +172,73 @@ if ! wait_server_healthy 300; then
 fi
 ok "السيرفر يعمل داخليًا"
 
+# ---- 5b. Edge mode: add Saloni's site block to the existing Caddy (backed up, validated, reversible)
+edge_block() {
+  cat <<BLOCK
+# saloni-begin (added by /opt/saloni/deploy/install.sh — Saloni API; remove this block to detach)
+$DOMAIN {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+	request_body {
+		max_size 6MB
+	}
+	reverse_proxy saloni-api:3000 {
+		header_up X-Forwarded-For {remote_host}
+	}
+}
+# saloni-end
+BLOCK
+}
+if [ -n "$(env_get SALONI_EDGE_NETWORK)" ]; then
+  EDGE_C="$(env_get SALONI_EDGE_CONTAINER)"
+  edge_block >"$DEPLOY_DIR/edge-site.caddy"
+  # Host file behind /etc/caddy/Caddyfile in that container (file mount, or the /etc/caddy directory).
+  CF_IN="/etc/caddy/Caddyfile"
+  CF_HOST="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}' "$EDGE_C")"
+  if [ -z "$CF_HOST" ]; then
+    D="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy"}}{{.Source}}{{end}}{{end}}' "$EDGE_C")"
+    [ -n "$D" ] && CF_HOST="$D/Caddyfile"
+  fi
+  manual_edge() {
+    warn "أضف الكتلة الموجودة في $DEPLOY_DIR/edge-site.caddy إلى ملف Caddyfile الخاص بـ $EDGE_C ثم أعد تحميله:"
+    warn "  docker exec $EDGE_C caddy reload --config $CF_IN --adapter caddyfile"
+  }
+  if [ -z "$CF_HOST" ] || [ ! -f "$CF_HOST" ]; then
+    manual_edge
+  elif grep -q '^# saloni-begin' "$CF_HOST"; then
+    ok "كتلة صالوني موجودة مسبقًا في $CF_HOST"
+  else
+    say "سأضيف موقع صالوني ($DOMAIN) إلى إعدادات $EDGE_C"
+    echo "    الملف: $CF_HOST — تؤخذ نسخة احتياطية منه، ويُفحص قبل التطبيق، ويُعاد كما كان إن فشل الفحص."
+    echo "    مواقعك الحالية لا تتغير."
+    REPLY=""
+    if [ "$ASSUME_YES" = 1 ]; then REPLY=y
+    elif [ -r /dev/tty ]; then read -r -p "    موافق؟ [y/N] " REPLY </dev/tty || true
+    fi
+    if [[ "$REPLY" =~ ^[Yy] ]]; then
+      BK="$CF_HOST.bak-saloni-$(date +%Y%m%d%H%M%S)"
+      cp -p "$CF_HOST" "$BK"
+      { echo; edge_block; } >>"$CF_HOST"   # append in place: keeps the inode the container has mounted
+      if docker exec "$EDGE_C" caddy validate --config "$CF_IN" --adapter caddyfile >/dev/null 2>&1 \
+         && docker exec "$EDGE_C" caddy reload --config "$CF_IN" --adapter caddyfile >/dev/null 2>&1; then
+        ok "أُضيف موقع صالوني إلى $EDGE_C (النسخة الاحتياطية: $BK)"
+      else
+        cat "$BK" >"$CF_HOST"
+        docker exec "$EDGE_C" caddy reload --config "$CF_IN" --adapter caddyfile >/dev/null 2>&1 || true
+        warn "فشل فحص الإعدادات الجديدة فأُعيد الملف كما كان."
+        manual_edge
+      fi
+    else
+      manual_edge
+    fi
+  fi
+fi
+
 say "فحص العنوان العام https://$DOMAIN …"
 PUBLIC_OK=0
 if wait_public_health "$DOMAIN"; then
@@ -154,7 +247,11 @@ if wait_public_health "$DOMAIN"; then
 else
   warn "السيرفر يعمل لكن العنوان العام لم يستجب بعد. الأغلب أن المنفذين 80 و443 مغلقان في لوحة مزوّد الخادم"
   warn "(Firewall / Security group)، أو أن النطاق لا يشير إلى IP هذا الخادم. افتحهما وانتظر دقيقة ثم جرّب الرابط أدناه."
-  warn "سجل Caddy: sudo docker compose -f $DEPLOY_DIR/docker-compose.yml logs --tail 50 caddy"
+  if [ -n "$(env_get SALONI_EDGE_CONTAINER)" ]; then
+    warn "سجل الوكيل: docker logs --tail 50 $(env_get SALONI_EDGE_CONTAINER)"
+  else
+    warn "سجل Caddy: sudo docker compose -f $DEPLOY_DIR/docker-compose.yml logs --tail 50 caddy"
+  fi
 fi
 
 cat <<MSG

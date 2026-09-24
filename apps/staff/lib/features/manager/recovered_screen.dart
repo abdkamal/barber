@@ -25,7 +25,9 @@ String eventTypeAr(String? type) => switch (type) {
     };
 
 /// ق40: «إجراءات مستردة للمراجعة» — ما رفعه مدير من جهاز حساب موقوف (وقع قبل
-/// الإيقاف فطُبّق)، حتى يعلّمه المدير «تمت المراجعة».
+/// الإيقاف فطُبّق، أو بوقت غير مؤكد فلم يُطبّق ويُسجَّل يدويًا إن حدث)، وما وصل
+/// بالمزامنة العادية بعد إعادة التفعيل وقد وقع أثناء الإيقاف — حتى يعلّمه
+/// المدير «تمت المراجعة».
 class RecoveredScreen extends ConsumerStatefulWidget {
   const RecoveredScreen({super.key});
 
@@ -54,7 +56,7 @@ class _RecoveredScreenState extends ConsumerState<RecoveredScreen> {
     final api = ref.read(servicesProvider).api;
     return DetailScaffold(
       title: 'إجراءات مستردة للمراجعة',
-      subtitle: 'رُفعت من أجهزة حسابات موقوفة (قبل الإيقاف فقط)',
+      subtitle: 'من أجهزة حسابات موقوفة، أو وقعت أثناء إيقاف الحساب',
       body: AsyncView<List<sa.RecoveredEventItem>>(
         key: _reloadKey,
         load: () => api.getRecoveredEvents(),
@@ -63,7 +65,8 @@ class _RecoveredScreenState extends ConsumerState<RecoveredScreen> {
             const EmptyState(
               icon: SaloniIconName.checkCircle,
               title: 'لا إجراءات بانتظار المراجعة',
-              body: 'تظهر هنا الإجراءات التي رفعها مدير من جهاز حساب موقوف.',
+              body: 'تظهر هنا الإجراءات التي رفعها مدير من جهاز حساب موقوف، '
+                  'وما وقع أثناء إيقاف حساب ثم وصل بعد إعادة تفعيله.',
             ),
           for (final item in list) _card(context, item),
         ]),
@@ -71,9 +74,26 @@ class _RecoveredScreenState extends ConsumerState<RecoveredScreen> {
     );
   }
 
+  /// ملخص الحمولة ليسجّل المدير الإجراء يدويًا (المبلغ، عدد الخدمات…).
+  String _payloadAr(sa.RecoveredEventItem item) {
+    final p = item.payloadSummary;
+    final cur = ref.read(authProvider).currency;
+    return [
+      if (p['amount'] is num) 'المبلغ: ${cur.format((p['amount'] as num).toInt())}',
+      if (p['serviceIds'] is List) 'الخدمات: ${digits('${(p['serviceIds'] as List).length}')}',
+      if (p['steps'] is num) 'التأجيل: ${digits('${p['steps']}')}',
+      if (p['decision'] == 'serve_late') 'القرار: خدمة بعد الإغلاق',
+      if (p['decision'] == 'cancel') 'القرار: إلغاء',
+      if (p['durationMin'] is num) minutesAr((p['durationMin'] as num).toInt()),
+      if (p['reason'] is String && (p['reason'] as String).isNotEmpty) 'السبب: ${p['reason']}',
+    ].join(' · ');
+  }
+
   Widget _card(BuildContext context, sa.RecoveredEventItem item) {
     final c = context.saloniColors;
     final at = item.occurredAt;
+    final during = item.kind == sa.RecoveredEventKind.duringSuspension;
+    final payload = _payloadAr(item);
     return SurfaceCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -85,16 +105,37 @@ class _RecoveredScreenState extends ConsumerState<RecoveredScreen> {
                 style: SaloniTextStyles.bodyStrong.copyWith(color: c.ink),
               ),
             ),
-            if (item.approximate)
+            if (!item.applied)
+              const StatusBadge(status: BookingStatus.cancelled, small: true, label: 'لم يُطبّق')
+            else if (during)
+              const StatusBadge(status: BookingStatus.waiting, small: true, label: 'أثناء الإيقاف')
+            else if (item.approximate)
               const StatusBadge(status: BookingStatus.waiting, small: true, label: 'توقيت تقريبي'),
           ]),
+          if (!item.applied) ...[
+            const SizedBox(height: 4),
+            Text(
+              'لم يُطبّق لأن وقته تقريبي (أُعيد تشغيل الجهاز دون اتصال) فلا يُعرف أوقع قبل الإيقاف. '
+              'سجّله يدويًا إن كان قد حدث فعلًا.',
+              style: SaloniTextStyles.body.copyWith(color: c.ink),
+            ),
+          ],
+          if (during) ...[
+            const SizedBox(height: 4),
+            Text(
+              'وقع أثناء إيقاف الحساب ووصل بعد إعادة تفعيله — طُبّق، راجعه.',
+              style: SaloniTextStyles.body.copyWith(color: c.ink),
+            ),
+          ],
+          if (payload.isNotEmpty) Muted(payload),
           const SizedBox(height: 4),
           Muted([
             'الحلاق: ${item.staffName ?? '—'}',
-            if (at != null) 'وقع ${weekdayAr(at)} ${timeAr(at)}',
+            if (at != null) '${item.approximate ? 'وقت الجهاز' : 'وقع'} ${weekdayAr(at)} ${timeAr(at)}',
           ].join(' · ')),
           Muted([
             if (item.suspendedAt != null) 'أُوقف ${weekdayAr(item.suspendedAt!)} ${timeAr(item.suspendedAt!)}',
+            if (item.reactivatedAt != null) 'أُعيد تفعيله ${weekdayAr(item.reactivatedAt!)} ${timeAr(item.reactivatedAt!)}',
             if (item.recoveredByName != null) 'رفعه ${item.recoveredByName}',
           ].join(' · ')),
           const SizedBox(height: 10),

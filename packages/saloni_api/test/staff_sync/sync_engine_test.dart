@@ -243,4 +243,81 @@ void main() {
       await engine.dispose();
     });
   });
+
+  group('StaffSyncEngine — ق40 مراجعة F1: ساعة التشغيل', () {
+    final saved = DateTime.utc(2026, 9, 24, 8, 0);
+
+    test('app reopened without a reboot: offline events keep exact (non-approximate) times', () async {
+      final server = _FakeServer()..offline = true;
+      final store = InMemoryLocalStore();
+      await store.saveClockAnchor(ClockAnchorRecord(saved, boot: const BootReading(Duration(hours: 1), bootId: 'b1')));
+      final boot = _FakeBootClock(const BootReading(Duration(hours: 1, minutes: 30), bootId: 'b1'));
+      final engine = StaffSyncEngine(api: _clientWith(server.handle), store: store, bootClock: boot);
+      await engine.start();
+      final e = await engine.recordEvent(DeviceEventType.serviceStarted, bookingId: 'b1');
+      expect(e.approximate, isFalse);
+      expect(e.occurredAt, saved.add(const Duration(minutes: 30)));
+      // Deep sleep counts too (the boot clock, not the process stopwatch).
+      boot.reading = const BootReading(Duration(hours: 2), bootId: 'b1');
+      final e2 = await engine.recordEvent(DeviceEventType.serviceFinished, bookingId: 'b1');
+      expect(e2.occurredAt, saved.add(const Duration(hours: 1)));
+      await engine.dispose();
+    });
+
+    test('after a reboot: approximate, never before the last server time', () async {
+      final server = _FakeServer()..offline = true;
+      final store = InMemoryLocalStore();
+      await store.saveClockAnchor(ClockAnchorRecord(saved, boot: const BootReading(Duration(hours: 1), bootId: 'b1')));
+      final engine = StaffSyncEngine(
+        api: _clientWith(server.handle),
+        store: store,
+        bootClock: _FakeBootClock(const BootReading(Duration(minutes: 3), bootId: 'b2')),
+        clock: MonotonicClock(wallClock: () => DateTime.utc(2026, 9, 24, 7)), // wall clock set back
+      );
+      await engine.start();
+      final e = await engine.recordEvent(DeviceEventType.serviceStarted, bookingId: 'b1');
+      expect(e.approximate, isTrue);
+      expect(e.occurredAt.isBefore(saved), isFalse);
+      await engine.dispose();
+    });
+
+    test('a successful sync saves the server time with the boot reading (atomically)', () async {
+      final server = _FakeServer();
+      final store = InMemoryLocalStore();
+      final engine = StaffSyncEngine(
+        api: _clientWith(server.handle),
+        store: store,
+        bootClock: _FakeBootClock(const BootReading(Duration(minutes: 42), bootId: 'b7')),
+      );
+      await engine.sync();
+      final a = (await store.getClockAnchor())!;
+      expect(a.serverTime, DateTime.utc(2026, 9, 24, 9));
+      expect(a.boot, const BootReading(Duration(minutes: 42), bootId: 'b7'));
+      await engine.dispose();
+    });
+
+    test('a failing boot clock is treated as unavailable', () async {
+      final server = _FakeServer();
+      final store = InMemoryLocalStore();
+      final engine = StaffSyncEngine(api: _clientWith(server.handle), store: store, bootClock: _ThrowingBootClock());
+      await engine.sync();
+      expect((await store.getClockAnchor())!.boot, isNull);
+      final e = await engine.recordEvent(DeviceEventType.serviceStarted, bookingId: 'b1');
+      expect(e.approximate, isFalse);
+      await engine.dispose();
+    });
+  });
+}
+
+class _FakeBootClock implements BootClock {
+  _FakeBootClock(this.reading);
+  BootReading? reading;
+
+  @override
+  Future<BootReading?> read() async => reading;
+}
+
+class _ThrowingBootClock implements BootClock {
+  @override
+  Future<BootReading?> read() async => throw StateError('no channel');
 }

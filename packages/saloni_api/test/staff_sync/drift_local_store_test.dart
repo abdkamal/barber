@@ -53,6 +53,15 @@ void main() {
       final t = DateTime.utc(2026, 9, 24, 9, 30);
       await store.saveLastServerTime(t);
       expect(await store.getLastServerTime(), t);
+
+      // ق40 مراجعة F1: مرساة الساعة مع قراءة ساعة التشغيل، تُحفظان معًا وتُمسحان مع الجهاز.
+      expect(await store.getClockAnchor(), isNull);
+      await store.saveClockAnchor(ClockAnchorRecord(t, boot: const BootReading(Duration(minutes: 90), bootId: '4')));
+      final a = (await store.getClockAnchor())!;
+      expect(a.serverTime, t);
+      expect(a.boot, const BootReading(Duration(minutes: 90), bootId: '4'));
+      await store.wipe();
+      expect(await store.getClockAnchor(), isNull);
     });
 
     test('nextDeviceSeq increases monotonically and survives re-reads', () async {

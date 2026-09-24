@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 
 import '../models/models.dart';
+import 'boot_clock.dart';
 import 'drift_database.dart';
 import 'local_store.dart';
 
@@ -13,6 +14,7 @@ const _kSettings = 'settings';
 const _kCursor = 'cursor';
 const _kLastServerTime = 'lastServerTime';
 const _kDeviceSeq = 'deviceSeq';
+const _kClockAnchor = 'clockAnchor';
 
 /// تنفيذ [LocalStore] فوق Drift/SQLite — design.md §6.1.
 ///
@@ -108,6 +110,14 @@ class DriftLocalStore implements LocalStore {
   @override
   Future<void> saveLastServerTime(DateTime time) =>
       _putRaw(_kLastServerTime, time.toUtc().toIso8601String());
+
+  @override
+  Future<ClockAnchorRecord?> getClockAnchor() =>
+      _getRaw<ClockAnchorRecord?>(_kClockAnchor, ClockAnchorRecord.fromJson);
+
+  @override
+  Future<void> saveClockAnchor(ClockAnchorRecord anchor) =>
+      _putRaw(_kClockAnchor, anchor.toJson());
 
   @override
   Future<int> currentDeviceSeq() async =>

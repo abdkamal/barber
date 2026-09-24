@@ -2,6 +2,13 @@
 # (Let's Encrypt) for SALONI_DOMAIN, redirects HTTP → HTTPS, and proxies everything to the API.
 {$SALONI_DOMAIN} {
 	encode gzip
+	# Security headers (HSTS for one year; the site is HTTPS-only, Caddy redirects HTTP).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
 	# Photo uploads are ≤ 5 MB (+ multipart overhead).
 	request_body {
 		max_size 6MB

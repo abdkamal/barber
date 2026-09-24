@@ -31,8 +31,10 @@ class BarberRepository extends ChangeNotifier {
     this.currency = const Currency('SAR', 'ر.س', 2),
     this.heartbeat = const Duration(seconds: 30),
     DateTime Function()? clock,
+    BootClock? bootClock,
     void Function()? onHandleReleased,
-  })  : _openStore = openStore,
+  })  : bootClock = bootClock ?? device.bootClock,
+        _openStore = openStore,
         _onHandleReleased = onHandleReleased,
         _now = clock ?? DateTime.now;
 
@@ -40,6 +42,10 @@ class BarberRepository extends ChangeNotifier {
   final DeviceServices device;
   final Currency currency;
   final Duration heartbeat;
+
+  /// ق40 (مراجعة F1): ساعة «منذ تشغيل الجهاز» لمحرك المزامنة (من [device]
+  /// افتراضيًا: قناة المنصة على أندرويد، ولا شيء في الاختبارات).
+  final BootClock bootClock;
   final Future<LocalStoreHandle> Function() _openStore;
 
   /// يُستدعى بعد إغلاق أو مسح مقبض القاعدة، ليُصفّر منسّق المقابض في
@@ -134,6 +140,7 @@ class BarberRepository extends ChangeNotifier {
       api: api,
       store: _handle!.store,
       heartbeatInterval: heartbeat,
+      bootClock: bootClock,
       onChanges: (_) => unawaited(refresh()),
     );
     _engine = engine;

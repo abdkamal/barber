@@ -87,7 +87,19 @@ export const StaffRepo = {
        WHERE id = $1 RETURNING ${PUBLIC_COLS}`,
       [id, patch.name ?? null, patch.role ?? null, patch.active ?? null, patch.callAheadMinutes ?? null, bumpTokenVersion, now],
     );
-    return rows[0] ?? null;
+    const s = rows[0];
+    if (s && patch.active !== undefined) {
+      // ق40 review (F2): every suspension interval is kept (events done during it are flagged later).
+      if (s.active) {
+        await q.query('UPDATE staff_suspensions SET reactivated_at = $2 WHERE staff_id = $1 AND reactivated_at IS NULL', [id, now]);
+      } else if (s.suspended_at) {
+        await q.query(
+          'INSERT INTO staff_suspensions (staff_id, suspended_at) VALUES ($1, $2) ON CONFLICT (staff_id) WHERE reactivated_at IS NULL DO NOTHING',
+          [id, s.suspended_at],
+        );
+      }
+    }
+    return s ?? null;
   },
 
   async recordLoginSuccess(q: TenantQueryable, id: string): Promise<void> {

@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:saloni_api/staff_sync.dart' show BootClock, NoBootClock;
+
+import 'boot_clock.dart';
 
 /// خدمات الجهاز: الخدمة الأمامية (design.md §1) وإذن الإشعارات (ق31، §8).
 /// تُستبدل في الاختبارات بـ[NoopDeviceServices].
@@ -19,11 +22,16 @@ abstract class DeviceServices {
   Future<void> updateKeepAlive({required String title, required String text});
 
   Future<void> stopKeepAlive();
+
+  /// ق40 (مراجعة F1): ساعة «منذ تشغيل الجهاز» لمحرك المزامنة.
+  BootClock get bootClock;
 }
 
 class NoopDeviceServices implements DeviceServices {
-  const NoopDeviceServices({this.allowed});
+  const NoopDeviceServices({this.allowed, this.bootClock = const NoBootClock()});
   final bool? allowed;
+  @override
+  final BootClock bootClock;
   @override
   Future<bool?> notificationsAllowed() async => allowed;
   @override
@@ -66,6 +74,9 @@ class _KeepAliveHandler extends TaskHandler {
 
 class AndroidDeviceServices implements DeviceServices {
   bool _initialized = false;
+
+  @override
+  BootClock get bootClock => const PlatformBootClock();
 
   void _init() {
     if (_initialized) return;

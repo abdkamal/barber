@@ -10,6 +10,7 @@
 /// Android SDK في هذه البيئة).
 library;
 
+export 'src/staff_sync/boot_clock.dart';
 export 'src/staff_sync/connection_state.dart';
 export 'src/staff_sync/drift_database.dart';
 export 'src/staff_sync/drift_local_store.dart';

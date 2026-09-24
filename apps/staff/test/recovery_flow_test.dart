@@ -118,6 +118,42 @@ void main() {
   );
 
   testWidgets(
+    'مراجعة F1: إجراء بوقت تقريبي لا يُطبّق — يظهر في ملخص الرفع بالعربية ويُحفظ للمراجعة',
+    (tester) async {
+      final server = FakeServer(role: 'barber');
+      server.booking(id: 'q1', name: 'فهد');
+      server.managerStaff = [
+        {'id': 'barber-1', 'name': 'خالد الحربي', 'username': 'khaled', 'role': 'barber', 'active': false},
+      ];
+      server.loginRoles['boss'] = 'manager';
+      server.uncertainTypes = {'service_finished'};
+      final h = await pumpStaffApp(tester, server, signedIn: false);
+      final storage = h.services.storage as InMemoryStoragePlatform;
+      await _barberWithPendingActions(tester, h);
+      server.suspendedAt = DateTime.now().toUtc().add(const Duration(hours: 1));
+      server.suspendedUsers.add('khaled');
+      await expectLater(
+        h.auth.login(salonCode: 'RAHA-27', username: 'khaled', password: 'x', rememberMe: true),
+        throwsA(isA<sa.ApiError>()),
+      );
+      await settle(tester);
+      await tester.enterText(find.byType(TextField).at(0), 'boss');
+      await tester.enterText(find.byType(TextField).at(1), 'manager-pw');
+      await tester.ensureVisible(find.text('دخول المدير ورفع الإجراءات'));
+      await tester.tap(find.text('دخول المدير ورفع الإجراءات'));
+      await settle(tester);
+      expect(find.text('اكتمل الرفع'), findsOneWidget);
+      expect(find.text('لم تُطبّق لعدم التأكد من وقتها'), findsOneWidget);
+      expect(find.textContaining('لتسجّلها يدويًا إن كانت قد حدثت فعلًا'), findsOneWidget);
+      expect(h.auth.recoveryReport?.summary.applied, 1);
+      expect(h.auth.recoveryReport?.summary.rejectedUncertainTime, 1);
+      // الجواب وصل عن كل الإجراءات (المرفوض محفوظ في قائمة المراجعة على السيرفر) ← يُمسح الجهاز.
+      expect(await storage.shared.getOutbox(), isEmpty);
+      await teardownApp(tester, h);
+    },
+  );
+
+  testWidgets(
     'الحساب غير موقوف (409) يبقي الصندوق؛ «مسح دون رفع» يطلب تأكيدًا ثم يمسح',
     (tester) async {
       final server = FakeServer(role: 'barber');
@@ -219,6 +255,38 @@ void main() {
         'reviewedAt': null,
         'reviewedBy': null,
       },
+      {
+        'id': 'item-2',
+        'staffId': 'barber-1',
+        'staffName': 'خالد الحربي',
+        'kind': 'recovered',
+        'status': 'not_applied_uncertain_time',
+        'type': 'payment_confirmed',
+        'bookingId': 'q2',
+        'customerName': 'سعد',
+        'occurredAt': DateTime.now().toUtc().subtract(const Duration(hours: 2)).toIso8601String(),
+        'approximate': true,
+        'payloadSummary': {'amount': 4500},
+        'reason': 'UNCERTAIN_TIME',
+        'recoveredBy': {'id': 'mgr-1', 'name': 'المدير'},
+        'recoveredAt': DateTime.now().toUtc().toIso8601String(),
+      },
+      {
+        'id': 'item-3',
+        'staffId': 'barber-1',
+        'staffName': 'خالد الحربي',
+        'kind': 'during_suspension',
+        'status': 'applied',
+        'type': 'service_started',
+        'customerName': 'ماجد',
+        'occurredAt': DateTime.now().toUtc().subtract(const Duration(hours: 3)).toIso8601String(),
+        'approximate': false,
+        'payloadSummary': {},
+        'suspendedAt': DateTime.now().toUtc().subtract(const Duration(hours: 4)).toIso8601String(),
+        'reactivatedAt': DateTime.now().toUtc().subtract(const Duration(hours: 1)).toIso8601String(),
+        'recoveredBy': null,
+        'recoveredAt': DateTime.now().toUtc().toIso8601String(),
+      },
     ];
     final h = await pumpStaffApp(tester, server);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).push('/m/recovered');
@@ -226,10 +294,20 @@ void main() {
     expect(find.text('إجراءات مستردة للمراجعة'), findsOneWidget);
     expect(find.text('تأكيد دفع — فهد'), findsOneWidget);
     expect(find.text('توقيت تقريبي'), findsOneWidget);
-    expect(find.textContaining('رفعه المدير'), findsOneWidget);
-    await tester.tap(find.text('تمت المراجعة'));
-    await settle(tester);
-    expect(server.acknowledged, ['item-1']);
+    expect(find.textContaining('رفعه المدير'), findsNWidgets(2));
+    // مراجعة F1: غير مطبّق — مع المبلغ ليسجّله المدير يدويًا.
+    expect(find.text('لم يُطبّق'), findsOneWidget);
+    expect(find.textContaining('سجّله يدويًا إن كان قد حدث فعلًا'), findsOneWidget);
+    expect(find.textContaining('المبلغ: '), findsOneWidget);
+    // مراجعة F2: وقع أثناء الإيقاف ووصل بعد إعادة التفعيل.
+    expect(find.text('أثناء الإيقاف'), findsOneWidget);
+    expect(find.textContaining('أُعيد تفعيله'), findsOneWidget);
+    for (final _ in [1, 2, 3]) {
+      await tester.ensureVisible(find.text('تمت المراجعة').first);
+      await tester.tap(find.text('تمت المراجعة').first);
+      await settle(tester);
+    }
+    expect(server.acknowledged, ['item-1', 'item-2', 'item-3']);
     expect(find.text('لا إجراءات بانتظار المراجعة'), findsOneWidget);
     await teardownApp(tester, h);
   });

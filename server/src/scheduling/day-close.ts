@@ -4,7 +4,7 @@ import { Texts } from '../notifications/texts';
 import type { TenantContext, TenantQueryable } from '../tenancy/tenant-context';
 import { BOOKING_SELECT, type BookingRow } from './rows';
 import { emitBooking } from './booking-writer';
-import { commitQueue, type DayWindow, type Effects, emitChange, insertBookingEvent, isStaleDay, loadDay, lockDayRow, schedulesOf, shiftOrDay } from './day';
+import { commitQueue, type DayWindow, type Effects, emitChange, insertBookingEvent, isStaleDay, loadDay, lockDayRow, type ScheduleLookup, schedulesOf, shiftOrDay } from './day';
 import { PostCommit } from './post-commit';
 
 /**
@@ -95,13 +95,21 @@ async function closeDay(
  * barber's open `breaks` rows and then emits (change_counter). Every path therefore takes
  * barber-day row → breaks rows → change_counter, never the reverse.
  */
-export async function closeStaleOpenBreaks(q: TenantQueryable, tz: string, staffId: string, now: number, effects: Effects, keepWorkDate?: string): Promise<void> {
+export async function closeStaleOpenBreaks(
+  q: TenantQueryable,
+  tz: string,
+  staffId: string,
+  now: number,
+  effects: Effects,
+  keepWorkDate?: string,
+  lookup: ScheduleLookup = {},
+): Promise<void> {
   const { rows } = await q.query<{ id: string; work_date: string; starts_at: Date }>(
     'SELECT id, work_date::text AS work_date, starts_at FROM breaks WHERE staff_id = $1 AND open FOR UPDATE',
     [staffId],
   );
   if (!rows.length) return;
-  const schedules = await schedulesOf(q, staffId);
+  const schedules = await schedulesOf(q, staffId, lookup);
   for (const b of rows) {
     if (b.work_date === keepWorkDate) continue;
     const shift = shiftOrDay(schedules, tz, b.work_date);

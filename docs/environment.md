@@ -7,7 +7,7 @@
 | Node.js / npm | 22.22 / 10.9 | ✅ |
 | Docker | 29.3 (يلزم تشغيل `dockerd`) | ✅ |
 | PostgreSQL | 16 (صورة `postgres:16-alpine`) | ✅ |
-| PgBouncer | صورة `edoburu/pgbouncer` (وضع transaction) | ✅ مجرَّب مع PostgreSQL |
+| PgBouncer | صورة `edoburu/pgbouncer:v1.25.2-p0` (PgBouncer 1.25.2، مثبّتة الإصدار؛ وضع transaction) | ✅ مجرَّب مع PostgreSQL |
 | Flutter / Dart | 3.47.5 stable / 3.13.4 في `/opt/sdk/flutter` | ✅ إنشاء مشروع، مكتبات pub.dev، اختبارات، بناء ويب |
 | Chromium (لتشغيل نسخة الويب والفحص) | `/opt/pw-browsers/chromium-*/chrome-linux/chrome` | ✅ |
 | Java (لـ Gradle) | OpenJDK 21 | ✅ |

@@ -15,7 +15,7 @@ import {
 } from '@saloni/engine';
 import { z } from 'zod';
 import type { Principal } from '../auth/principal';
-import { ApiError } from '../common/errors';
+import { ApiError, Errors } from '../common/errors';
 import { isUniqueViolation } from '../db/sql';
 import { NotificationService } from '../notifications/notification.service';
 import { Texts } from '../notifications/texts';
@@ -75,10 +75,12 @@ export interface ApplyOpts {
    * strictly before `suspendedAt` are applied (flagged, marked with the manager, listed for review).
    */
   recovery?: { by: string; suspendedAt: number };
+  /** ق40 review F4: receives each outcome as soon as it is known (partial results if the batch fails). */
+  sink?: Map<string, EventOutcome>;
 }
 
 /** ق40: per-event result of a manager recovery upload. */
-export type RecoveryResult = 'applied' | 'duplicate' | 'rejected_after_suspension' | 'rejected_invalid';
+export type RecoveryResult = 'applied' | 'duplicate' | 'rejected_after_suspension' | 'rejected_uncertain_time' | 'rejected_invalid';
 
 export interface RecoveryOutcome {
   eventId: string;
@@ -90,11 +92,38 @@ export interface RecoveryResponse {
   staffId: string;
   suspendedAt: string;
   results: RecoveryOutcome[];
-  summary: { applied: number; duplicate: number; rejectedAfterSuspension: number; rejectedInvalid: number };
+  summary: { applied: number; duplicate: number; rejectedAfterSuspension: number; rejectedUncertainTime: number; rejectedInvalid: number };
 }
 
 /** ق40: reason of an event whose device time is not before the suspension. */
 export const AFTER_SUSPENSION = 'AFTER_SUSPENSION';
+
+/**
+ * ق40 review F1: reason of a recovered event whose device time is approximate (the device restarted
+ * offline — its time is not monotonic-corrected and could be after the suspension). Not applied;
+ * kept in the review list for the manager to record by hand if it really happened.
+ */
+export const UNCERTAIN_TIME = 'UNCERTAIN_TIME';
+
+/** ق40 review F2: one suspension interval of an account (`staff_suspensions`; open = null end). */
+export interface SuspensionInterval {
+  suspendedAt: number;
+  reactivatedAt: number | null;
+}
+
+/** ق40 review F6: the event was applied by a concurrent upload while this one waited for the lock. */
+class AlreadyRecorded extends Error {
+  constructor(readonly result: string) {
+    super('ALREADY_RECORDED');
+  }
+}
+
+/** Aborts the whole batch (not recorded as the event's rejection): the account changed state meanwhile. */
+class Abort extends Error {
+  constructor(readonly error: ApiError) {
+    super(error.code);
+  }
+}
 
 /** A transition the state machine refuses (recorded for the manager, design §6.2). */
 class Reject extends Error {
@@ -125,13 +154,20 @@ interface EvCtx {
   batch: BatchState;
   /** ق40: the manager recovering this event for a suspended account (null = normal sync). */
   recoveredBy: string | null;
+  /** ق40 review F2: normal sync of an event done while the account was suspended (flagged for review). */
+  duringSuspension: SuspensionInterval | null;
 }
 
 /** Per-batch bookkeeping: conflict rows for the manager are capped per batch (review M4). */
 interface BatchState {
   conflicts: number;
   suppressed: number;
+  /** ق40 review F2: the account's suspension intervals (normal sync only). */
+  suspensions: SuspensionInterval[];
 }
+
+/** ق40 review F3: shifts of events are resolved including inactive accounts (see ScheduleLookup). */
+const ANY_STAFF = { includeInactive: true } as const;
 
 /** At most this many `sync_conflicts` rows per batch; the rest are counted in one summary row. */
 export const MAX_CONFLICTS_PER_BATCH = 10;
@@ -189,8 +225,8 @@ export class SyncService {
 
   async applyBatch(t: TenantContext, me: Principal, events: DeviceEventIn[], opts: ApplyOpts = {}): Promise<EventOutcome[]> {
     const sorted = [...events].sort((a, b) => a.deviceSeq - b.deviceSeq);
-    const out = new Map<string, EventOutcome>();
-    const batch: BatchState = { conflicts: 0, suppressed: 0 };
+    const out = opts.sink ?? new Map<string, EventOutcome>();
+    const batch: BatchState = { conflicts: 0, suppressed: 0, suspensions: opts.recovery ? [] : await suspensionsOf(t.db, me.subjectId) };
     // Review M4: malformed events are rejected before any per-event DB work — recorded in one
     // statement (so retries are recognised as duplicates) and summarised in ONE conflict row.
     const ids = [...new Set(events.map((e) => e.id))];
@@ -249,16 +285,19 @@ export class SyncService {
     });
   }
 
-  private async applyOne(t: TenantContext, me: Principal, ev: DeviceEventIn, opts: ApplyOpts, batch: BatchState = { conflicts: 0, suppressed: 0 }): Promise<EventOutcome> {
+  private async applyOne(t: TenantContext, me: Principal, ev: DeviceEventIn, opts: ApplyOpts, batch: BatchState = { conflicts: 0, suppressed: 0, suspensions: [] }): Promise<EventOutcome> {
     const prior = await t.db.query<{ result: string; reason: string | null }>('SELECT result, reason FROM device_events WHERE id = $1', [ev.id]);
     if (prior.rows[0]) return { eventId: ev.id, result: 'duplicate', reason: prior.rows[0].result };
     const now = this.clock.now();
     let at = Date.parse(ev.occurredAt);
     let approximate = !!ev.approximate;
     const recovery = opts.recovery;
-    const c: EvCtx = { t, me, ev, at, approximate, clamped: false, deviceId: me.sessionId, now, flagged: false, batch, recoveredBy: recovery?.by ?? null };
+    const c: EvCtx = { t, me, ev, at, approximate, clamped: false, deviceId: me.sessionId, now, flagged: false, batch, recoveredBy: recovery?.by ?? null, duringSuspension: null };
     try {
       if (!Number.isFinite(at)) throw new Reject('INVALID_TIME');
+      // ق40 review F1: an approximate device time (restarted offline) cannot prove the action came
+      // before the suspension — never applied by recovery; kept for the manager's review instead.
+      if (recovery && approximate) throw new Reject(UNCERTAIN_TIME);
       if (at > now + MAX_FUTURE_SKEW_MS) {
         // L1: never in the future beyond a small skew — clamped to now, its duration sample excluded.
         at = now;
@@ -277,9 +316,16 @@ export class SyncService {
         if (at > opts.revokedAt) throw new Reject('ACCOUNT_REVOKED', true);
         c.flagged = true;
       }
+      if (!recovery) {
+        // ق40 review F2: done while the account was suspended (uploaded after its reactivation) —
+        // applied (no data loss) but flagged and listed for the manager's review.
+        c.duringSuspension = duringSuspension(at, approximate, batch.suspensions);
+        if (c.duringSuspension) c.flagged = true;
+      }
       c.at = at;
       c.approximate = approximate;
       const applied = await this.post.tx(t, async (q, effects) => {
+        await this.guardAccount(q, c, recovery);
         const r = await this.dispatch(q, effects, c);
         // ق40: an L1 clamp (e.g. never before the booking existed) must not carry a recovered
         // event past the suspension — the whole transaction is rolled back and it is refused.
@@ -291,20 +337,23 @@ export class SyncService {
         );
         if (recovery) {
           // ق40: every recovered event waits for the manager's acknowledgement (review list).
-          await q.query('INSERT INTO sync_conflicts (staff_id, booking_id, device_event_id, kind, details) VALUES ($1, $2, $3, $4, $5)', [
-            me.subjectId,
-            ev.bookingId && (await loadBooking(q, ev.bookingId)) ? ev.bookingId : null,
-            ev.id,
-            'recovered_event',
-            JSON.stringify({
-              type: ev.type,
-              occurredAt: new Date(c.at).toISOString(),
-              approximate: c.approximate,
-              suspendedAt: new Date(recovery.suspendedAt).toISOString(),
-              recoveredBy: recovery.by,
-              ...(r.reason ? { reason: r.reason } : {}),
-            }),
-          ]);
+          await this.reviewItem(q, c, {
+            source: 'recovery',
+            status: 'applied',
+            suspendedAt: new Date(recovery.suspendedAt).toISOString(),
+            recoveredBy: recovery.by,
+            ...(r.reason ? { reason: r.reason } : {}),
+          });
+          await this.auditRecoveredEvent(q, c, 'applied', r.reason ?? null);
+        } else if (c.duringSuspension) {
+          // ق40 review F2: applied, and listed for review next to the recovered events.
+          await this.reviewItem(q, c, {
+            source: 'during_suspension',
+            status: 'applied',
+            suspendedAt: new Date(c.duringSuspension.suspendedAt).toISOString(),
+            reactivatedAt: c.duringSuspension.reactivatedAt === null ? null : new Date(c.duringSuspension.reactivatedAt).toISOString(),
+            ...(r.reason ? { reason: r.reason } : {}),
+          });
         } else if (c.flagged && !r.flagged) {
           await q.query('INSERT INTO sync_conflicts (staff_id, booking_id, device_event_id, kind, details) VALUES ($1, $2, $3, $4, $5)', [
             me.subjectId,
@@ -318,17 +367,90 @@ export class SyncService {
       });
       return { eventId: ev.id, result: 'applied', ...(applied.reason ? { reason: applied.reason } : {}) };
     } catch (e) {
+      if (e instanceof Abort) throw e.error;
+      if (e instanceof AlreadyRecorded) return { eventId: ev.id, result: 'duplicate', reason: e.result };
       if (isUniqueViolation(e)) return { eventId: ev.id, result: 'duplicate' };
       const code = e instanceof Reject ? e.code : e instanceof ApiError ? e.code : e instanceof z.ZodError ? 'INVALID_PAYLOAD' : null;
       if (!code) throw e;
       // ق40: the manager recovering the events sees every rejection in the answer — no push alert.
-      await this.recordRejection(t, me, c, code, e instanceof Reject && e.flag && !c.recoveredBy);
+      try {
+        const recorded = await this.recordRejection(t, me, c, code, e instanceof Reject && e.flag && !c.recoveredBy, recovery);
+        if (!recorded) {
+          // ق40 review F6: a concurrent upload of the same event got there first (its transition
+          // is why this one was refused) — report what happened to it, not the refusal.
+          const { rows } = await t.db.query<{ result: string }>('SELECT result FROM device_events WHERE id = $1', [ev.id]);
+          return { eventId: ev.id, result: 'duplicate', ...(rows[0] ? { reason: rows[0].result } : {}) };
+        }
+      } catch (e2) {
+        if (e2 instanceof Abort) throw e2.error;
+        throw e2;
+      }
       return { eventId: ev.id, result: 'rejected', reason: code };
     }
   }
 
-  private async recordRejection(t: TenantContext, me: Principal, c: EvCtx, code: string, notifyManagers: boolean): Promise<void> {
-    await this.post.tx(t, async (q, effects) => {
+  /**
+   * ق40 review F6: the account's state is re-read (FOR SHARE — a concurrent suspension or
+   * reactivation waits for this event) inside each event's transaction. Recovery needs the account
+   * still suspended since the same instant; a normal sync needs it active. Otherwise the whole batch
+   * stops without recording anything for the remaining events (they stay on the device).
+   */
+  private async guardAccount(q: TenantQueryable, c: EvCtx, recovery: ApplyOpts['recovery']): Promise<void> {
+    const { rows } = await q.query<{ active: boolean; suspended_at: Date | null }>('SELECT active, suspended_at FROM staff WHERE id = $1 FOR SHARE', [
+      c.me.subjectId,
+    ]);
+    const s = rows[0];
+    if (recovery) {
+      if (!s || s.active || s.suspended_at?.getTime() !== recovery.suspendedAt) {
+        throw new Abort(Errors.conflict('ACCOUNT_NOT_SUSPENDED', 'تغيّرت حالة الحساب أثناء الرفع (أُعيد تفعيله أو أُوقف من جديد) — أعد المحاولة'));
+      }
+    } else if (!s || !s.active) {
+      throw new Abort(Errors.unauthenticated());
+    }
+  }
+
+  /** ق40: one item of the manager's review list (`sync_conflicts` kind `recovered_event`). */
+  private async reviewItem(q: TenantQueryable, c: EvCtx, extra: Record<string, unknown>): Promise<void> {
+    const bookingId = isUuid(c.ev.bookingId) && (await loadBooking(q, c.ev.bookingId!)) ? c.ev.bookingId! : null;
+    await q.query('INSERT INTO sync_conflicts (staff_id, booking_id, device_event_id, kind, details) VALUES ($1, $2, $3, $4, $5)', [
+      c.me.subjectId,
+      bookingId,
+      c.ev.id,
+      'recovered_event',
+      JSON.stringify({
+        type: c.ev.type,
+        occurredAt: new Date(c.at).toISOString(),
+        approximate: c.approximate,
+        payloadSummary: payloadSummary(c.ev),
+        ...extra,
+      }),
+    ]);
+  }
+
+  /** ق40 review F4: per-event audit, written in the event's own transaction. */
+  private async auditRecoveredEvent(q: TenantQueryable, c: EvCtx, result: 'applied' | 'rejected', reason: string | null): Promise<void> {
+    await writeAudit(q, {
+      actorKind: 'staff',
+      actorId: c.recoveredBy!,
+      action: 'staff.event_recovered',
+      targetKind: 'staff',
+      targetId: c.me.subjectId,
+      details: {
+        eventId: c.ev.id,
+        type: String(c.ev.type).slice(0, 40),
+        bookingId: isUuid(c.ev.bookingId) ? c.ev.bookingId : null,
+        occurredAt: c.ev.occurredAt,
+        approximate: !!c.ev.approximate,
+        result,
+        reason,
+      },
+    });
+  }
+
+  /** Records a refused event once; false when the event id was already recorded (a concurrent upload). */
+  private async recordRejection(t: TenantContext, me: Principal, c: EvCtx, code: string, notifyManagers: boolean, recovery?: ApplyOpts['recovery']): Promise<boolean> {
+    return this.post.tx(t, async (q, effects) => {
+      await this.guardAccount(q, c, recovery);
       const ins = await q.query(
         `INSERT INTO device_events (id, staff_id, device_id, device_seq, type, booking_id, payload, occurred_at, approximate, result, reason, flagged, recovered_by_staff_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'rejected', $10, true, $11) ON CONFLICT (id) DO NOTHING`,
@@ -346,12 +468,26 @@ export class SyncService {
           c.recoveredBy,
         ],
       );
-      if (!ins.rowCount) return;
+      if (!ins.rowCount) return false;
+      if (c.recoveredBy) await this.auditRecoveredEvent(q, c, 'rejected', code);
       // ق40: an event after the suspension is simply not applied (reported to the manager uploading it).
-      if (c.recoveredBy && code === AFTER_SUSPENSION) return;
+      if (c.recoveredBy && code === AFTER_SUSPENSION) return true;
+      if (c.recoveredBy && code === UNCERTAIN_TIME) {
+        // ق40 review F1: not applied, but kept (type, booking, customer, device time, amount…) in the
+        // review list so it is not lost when the device is wiped — the manager records it by hand
+        // if it really happened.
+        await this.reviewItem(q, c, {
+          source: 'recovery',
+          status: 'not_applied_uncertain_time',
+          reason: UNCERTAIN_TIME,
+          suspendedAt: recovery ? new Date(recovery.suspendedAt).toISOString() : null,
+          recoveredBy: c.recoveredBy,
+        });
+        return true;
+      }
       if (c.batch.conflicts >= MAX_CONFLICTS_PER_BATCH) {
         c.batch.suppressed++;
-        return;
+        return true;
       }
       c.batch.conflicts++;
       const bookingId = isUuid(c.ev.bookingId) && (await loadBooking(q, c.ev.bookingId!)) ? c.ev.bookingId! : null;
@@ -363,6 +499,7 @@ export class SyncService {
         JSON.stringify({ type: c.ev.type, reason: code }),
       ]);
       if (notifyManagers) await this.alertManagers(q, effects, me, bookingId, `رُفض حدث «${c.ev.type}» (${code})`);
+      return true;
     });
   }
 
@@ -417,8 +554,9 @@ export class SyncService {
   }
 
   private async lockDay(q: TenantQueryable, c: EvCtx, row: BookingRow, effects: Effects): Promise<DayCtx> {
-    const shift = await shiftForDate(q, c.t.salon.timezone, row.staff_id, row.work_date);
-    const ctx = await loadDay(q, c.t.salon, row.staff_id, shift, c.now, { lock: true });
+    const shift = await shiftForDate(q, c.t.salon.timezone, row.staff_id, row.work_date, ANY_STAFF);
+    const ctx = await loadDay(q, c.t.salon, row.staff_id, shift, c.now, { lock: true, ...ANY_STAFF });
+    await this.notRecordedMeanwhile(q, c);
     await releaseExpiredOffers(q, ctx, effects);
     return ctx;
   }
@@ -432,14 +570,25 @@ export class SyncService {
     const settings = await SettingsRepo.get(q);
     const lookahead = settings.booking_opens_before_minutes * MINUTE;
     const shift =
-      (await resolveShift(q, c.t.salon.timezone, c.me.subjectId, c.at, lookahead)) ??
-      (await operationalShift(q, c.t.salon.timezone, c.me.subjectId, c.now, dayWindow(settings)));
+      (await resolveShift(q, c.t.salon.timezone, c.me.subjectId, c.at, lookahead, ANY_STAFF)) ??
+      (await operationalShift(q, c.t.salon.timezone, c.me.subjectId, c.now, dayWindow(settings), undefined, ANY_STAFF));
     if (!shift) throw new Reject('NOT_WORKING');
     await lockDayRow(q, c.me.subjectId, shift.workDate);
+    await this.notRecordedMeanwhile(q, c);
     if (beforeEmit) await beforeEmit(shift);
-    const ctx = await loadDay(q, c.t.salon, c.me.subjectId, shift, c.now, { lock: true, settings });
+    const ctx = await loadDay(q, c.t.salon, c.me.subjectId, shift, c.now, { lock: true, settings, ...ANY_STAFF });
     await releaseExpiredOffers(q, ctx, effects);
     return ctx;
+  }
+
+  /**
+   * ق40 review F6: once the lock is held, a concurrent upload of the SAME event (a retry, or two
+   * uploads of one device) has committed — this one is its duplicate, not a refused transition
+   * (its state checks ran on the booking as it was before that commit).
+   */
+  private async notRecordedMeanwhile(q: TenantQueryable, c: EvCtx): Promise<void> {
+    const { rows } = await q.query<{ result: string }>('SELECT result FROM device_events WHERE id = $1', [c.ev.id]);
+    if (rows[0]) throw new AlreadyRecorded(rows[0].result);
   }
 
   private event(q: TenantQueryable, c: EvCtx, bookingId: string | null, type: string, payload: Record<string, unknown> = {}, reason: string | null = null) {
@@ -547,7 +696,10 @@ export class SyncService {
         'started_after_' + conflict,
         JSON.stringify({ previousStatus: conflict, cancelledAt: row.cancelled_at?.toISOString() ?? null, startedAt: new Date(c.at).toISOString() }),
       ]);
-      await this.alertManagers(q, effects, c.me, row.id, conflict === 'cancelled' ? 'بدأت الخدمة بعد إلغاء الحجز' : 'بدأت الخدمة بعد تسجيل «لم يحضر»');
+      // ق40 review F5: a recovered event alerts nobody — the manager uploading it sees it in the review list.
+      if (!c.recoveredBy) {
+        await this.alertManagers(q, effects, c.me, row.id, conflict === 'cancelled' ? 'بدأت الخدمة بعد إلغاء الحجز' : 'بدأت الخدمة بعد تسجيل «لم يحضر»');
+      }
       return { flagged: true, reason: 'CONFLICT_ACTUAL_EVENT_WINS' };
     }
     return {};
@@ -595,7 +747,7 @@ export class SyncService {
       ],
     );
     if (afterClose) await resolveUnfinishedConflict(q, row.id, c.me.subjectId);
-    if (measured !== null) await this.checkBaseDuration(q, effects, ctx, row);
+    if (measured !== null && !c.recoveredBy) await this.checkBaseDuration(q, effects, ctx, row); // ق40 review F5: no alert on recovery
     const { rows: svc } = await q.query<{ total: string }>('SELECT COALESCE(sum(price_minor), 0) AS total FROM booking_services WHERE booking_id = $1', [row.id]);
     await q.query('INSERT INTO payments (booking_id, amount_minor) VALUES ($1, $2) ON CONFLICT (booking_id) DO NOTHING', [row.id, Number(svc[0]!.total)]);
     await emitBooking(q, ctx, row.id, 'booking_updated', effects);
@@ -671,6 +823,7 @@ export class SyncService {
       'SELECT id, status, amount_minor FROM payments WHERE booking_id = $1 FOR UPDATE',
       [row.id],
     );
+    await this.notRecordedMeanwhile(q, c);
     const p = rows[0];
     if (!p) throw new Reject('NO_PAYMENT_YET');
     if (p.status === 'confirmed') {
@@ -780,7 +933,7 @@ export class SyncService {
     const { kind, durationMin } = BreakPayload.parse(c.ev.payload ?? {});
     // An open break left over from an earlier day must not block today's (review, minor) — closed
     // under the day lock and before any change is emitted (lock order, round 2).
-    const ctx = await this.lockToday(q, c, effects, (shift) => closeStaleOpenBreaks(q, c.t.salon.timezone, c.me.subjectId, c.now, effects, shift.workDate));
+    const ctx = await this.lockToday(q, c, effects, (shift) => closeStaleOpenBreaks(q, c.t.salon.timezone, c.me.subjectId, c.now, effects, shift.workDate, ANY_STAFF));
     const { rows: open } = await q.query('SELECT 1 FROM breaks WHERE staff_id = $1 AND open', [c.me.subjectId]);
     if (open.length) throw new Reject('BREAK_ALREADY_OPEN');
     const before = project(ctx);
@@ -789,7 +942,7 @@ export class SyncService {
        VALUES ($1, $2, $3, $4, $5, true, $1) RETURNING id`,
       [c.me.subjectId, ctx.shift.workDate, kind, new Date(c.at), new Date(c.at + (durationMin ?? DEFAULT_BREAK_MIN) * MINUTE)],
     );
-    const fresh = await loadDay(q, c.t.salon, c.me.subjectId, ctx.shift, c.now, { lock: true, settings: ctx.settings, staff: ctx.staff });
+    const fresh = await loadDay(q, c.t.salon, c.me.subjectId, ctx.shift, c.now, { lock: true, settings: ctx.settings, staff: ctx.staff, ...ANY_STAFF });
     await commitQueue(q, fresh, fresh.queue, { reason: 'barber_break', effects, actorKind: 'staff', actorId: c.me.subjectId, before });
     await this.event(q, c, null, 'break_started', { breakId: rows[0]!.id, kind, durationMin: durationMin ?? DEFAULT_BREAK_MIN });
     await emitChange(q, effects, { staffId: c.me.subjectId, type: 'break_started', entity: 'break', data: { breakId: rows[0]!.id, kind, start: new Date(c.at).toISOString() } });
@@ -805,7 +958,7 @@ export class SyncService {
     if (!b) throw new Reject('NO_OPEN_BREAK');
     const before = project(ctx);
     await q.query('UPDATE breaks SET open = false, ends_at = $2 WHERE id = $1', [b.id, new Date(Math.max(c.at, b.starts_at.getTime() + 1000))]);
-    const fresh = await loadDay(q, c.t.salon, c.me.subjectId, ctx.shift, c.now, { lock: true, settings: ctx.settings, staff: ctx.staff });
+    const fresh = await loadDay(q, c.t.salon, c.me.subjectId, ctx.shift, c.now, { lock: true, settings: ctx.settings, staff: ctx.staff, ...ANY_STAFF });
     await commitQueue(q, fresh, fresh.queue, { reason: 'break_ended', effects, actorKind: 'staff', actorId: c.me.subjectId, before });
     await this.event(q, c, null, 'break_ended', { breakId: b.id });
     await emitChange(q, effects, { staffId: c.me.subjectId, type: 'break_ended', entity: 'break', data: { breakId: b.id, end: new Date(c.at).toISOString() } });
@@ -826,6 +979,8 @@ export class SyncService {
     await writeAudit(q, { actorKind: 'staff', actorId: c.me.subjectId, action: 'staff.absent_reported', targetKind: 'staff', targetId: c.me.subjectId, details: { workDate: ctx.shift.workDate, ...recovered(c) } });
     await emitChange(q, effects, { staffId: c.me.subjectId, type: 'day_state', entity: 'barber_day', data: { workDate: ctx.shift.workDate, state: stateWire({ kind: 'absent' }) } });
     const open = ctx.queue.filter((e) => !e.offer && e.status !== 'in_service').length;
+    // ق40 review F5: a recovered absence alerts nobody (the manager uploading it sees the review list).
+    if (c.recoveredBy) return {};
     await this.notifications.toManagers(q, effects, {
       type: 'barber_absent',
       text: Texts.barberAbsent(ctx.staff.name, open),
@@ -854,7 +1009,33 @@ export class SyncService {
   ): Promise<RecoveryResponse> {
     const as: Principal = { salonId: t.salonId, subjectId: target.id, role: target.role, sessionId: manager.sessionId };
     const suspendedAt = target.suspendedAt.getTime();
-    const raw = await this.applyBatch(t, as, events, { recovery: { by: manager.subjectId, suspendedAt } });
+    // ق40 review F4: the summary audit entry is written even when the upload fails part-way
+    // (with the outcomes known so far); each event also has its own audit entry in its transaction.
+    const sink = new Map<string, EventOutcome>();
+    let raw: EventOutcome[] | null = null;
+    try {
+      raw = await this.applyBatch(t, as, events, { recovery: { by: manager.subjectId, suspendedAt }, sink });
+    } finally {
+      if (!raw) {
+        // Failed part-way: audit what was done so far (best effort — the upload keeps its own error).
+        const partial = events.map((e) => sink.get(e.id)).filter((o): o is EventOutcome => !!o);
+        await this.auditRecovery(t, manager, target, events.length, partial, false, ip).catch(() => undefined);
+      }
+    }
+    const out = await this.auditRecovery(t, manager, target, events.length, raw, true, ip);
+    return { staffId: target.id, suspendedAt: target.suspendedAt.toISOString(), ...out };
+  }
+
+  /** ق40: per-event results of a recovery upload and its summary audit entry. */
+  private async auditRecovery(
+    t: TenantContext,
+    manager: Principal,
+    target: { id: string; suspendedAt: Date },
+    total: number,
+    raw: EventOutcome[],
+    complete: boolean,
+    ip: string | null,
+  ): Promise<Pick<RecoveryResponse, 'results' | 'summary'>> {
     // A retry: tell the manager what happened to the event the first time.
     const dupIds = raw.filter((o) => o.result === 'duplicate').map((o) => o.eventId);
     const prior = new Map<string, { result: string; reason: string | null }>();
@@ -865,7 +1046,7 @@ export class SyncService {
       );
       for (const r of rows) prior.set(r.id, r);
     }
-    const { results, summary } = recoveryOutcomes(raw, prior);
+    const out = recoveryOutcomes(raw, prior);
     await writeAudit(t, {
       actorKind: 'staff',
       actorId: manager.subjectId,
@@ -875,12 +1056,13 @@ export class SyncService {
       ip,
       details: {
         suspendedAt: target.suspendedAt.toISOString(),
-        total: events.length,
-        summary,
-        appliedEventIds: results.filter((x) => x.result === 'applied').map((x) => x.eventId),
+        total,
+        complete,
+        summary: out.summary,
+        appliedEventIds: out.results.filter((x) => x.result === 'applied').map((x) => x.eventId),
       },
     });
-    return { staffId: target.id, suspendedAt: target.suspendedAt.toISOString(), results, summary };
+    return out;
   }
 
   // ─── Pull ──────────────────────────────────────────────────────────────────────────
@@ -930,7 +1112,7 @@ export function recoveryOutcomes(
   prior: Map<string, { result: string; reason: string | null }>,
 ): Pick<RecoveryResponse, 'results' | 'summary'> {
   const classify = (reason: string | null | undefined): RecoveryResult =>
-    reason === AFTER_SUSPENSION ? 'rejected_after_suspension' : 'rejected_invalid';
+    reason === AFTER_SUSPENSION ? 'rejected_after_suspension' : reason === UNCERTAIN_TIME ? 'rejected_uncertain_time' : 'rejected_invalid';
   const results: RecoveryOutcome[] = raw.map((o) => {
     if (o.result === 'duplicate') {
       const p = prior.get(o.eventId);
@@ -947,9 +1129,46 @@ export function recoveryOutcomes(
       applied: count('applied'),
       duplicate: count('duplicate'),
       rejectedAfterSuspension: count('rejected_after_suspension'),
+      rejectedUncertainTime: count('rejected_uncertain_time'),
       rejectedInvalid: count('rejected_invalid'),
     },
   };
+}
+
+/** ق40 review F2: the account's suspension intervals, oldest first. */
+async function suspensionsOf(q: TenantQueryable, staffId: string): Promise<SuspensionInterval[]> {
+  const { rows } = await q.query<{ suspended_at: Date; reactivated_at: Date | null }>(
+    'SELECT suspended_at, reactivated_at FROM staff_suspensions WHERE staff_id = $1 ORDER BY suspended_at',
+    [staffId],
+  );
+  return rows.map((r) => ({ suspendedAt: r.suspended_at.getTime(), reactivatedAt: r.reactivated_at?.getTime() ?? null }));
+}
+
+/**
+ * ق40 review F2: the suspension interval a normally-synced event was done in, or null. An exact
+ * (monotonic-corrected) time must fall inside [suspended, reactivated); an approximate time proves
+ * nothing, so any interval that ended after the claimed time counts (the latest one is reported).
+ */
+export function duringSuspension(at: number, approximate: boolean, intervals: readonly SuspensionInterval[]): SuspensionInterval | null {
+  let hit: SuspensionInterval | null = null;
+  for (const i of intervals) {
+    const end = i.reactivatedAt ?? Number.POSITIVE_INFINITY;
+    if (approximate ? end > at : i.suspendedAt <= at && at < end) hit = i;
+  }
+  return hit;
+}
+
+/** ق40 review F1: what the manager needs to record a not-applied event by hand (bounded, known keys only). */
+export function payloadSummary(ev: Pick<DeviceEventIn, 'payload'>): Record<string, unknown> {
+  const p = ev.payload ?? {};
+  const out: Record<string, unknown> = {};
+  for (const k of ['amount', 'serviceIds', 'steps', 'decision', 'reason', 'kind', 'durationMin'] as const) {
+    const v = p[k];
+    if (typeof v === 'number' || typeof v === 'boolean') out[k] = v;
+    else if (typeof v === 'string') out[k] = v.slice(0, 300);
+    else if (Array.isArray(v)) out[k] = v.filter((x) => typeof x === 'string').slice(0, 10);
+  }
+  return out;
 }
 
 /** ق40: audit details marker for an event recovered by a manager. */

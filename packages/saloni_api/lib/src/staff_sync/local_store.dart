@@ -1,4 +1,5 @@
 import '../models/models.dart';
+import 'boot_clock.dart';
 
 /// حالة حدث في صندوق الأحداث المحلي.
 enum OutboxStatus { pending, sending }
@@ -56,6 +57,11 @@ abstract class LocalStore {
   Future<DateTime?> getLastServerTime();
   Future<void> saveLastServerTime(DateTime time);
 
+  /// مرساة الساعة (وقت السيرفر + قراءة ساعة تشغيل الجهاز معه) — ق40 مراجعة F1:
+  /// تُحفظان معًا ذرّيًا ليُحسب وقت إغلاق التطبيق بدقة عند إعادة فتحه.
+  Future<ClockAnchorRecord?> getClockAnchor();
+  Future<void> saveClockAnchor(ClockAnchorRecord anchor);
+
   /// رقم تسلسل الجهاز التالي (متزايد دائمًا، حتى عبر إعادة التشغيل) — يستهلكه.
   Future<int> nextDeviceSeq();
 
@@ -78,6 +84,7 @@ class InMemoryLocalStore implements LocalStore {
   Map<String, dynamic> _settings = const {};
   int _cursor = 0;
   DateTime? _lastServerTime;
+  ClockAnchorRecord? _clockAnchor;
   int _deviceSeq = 0;
   final Map<String, OutboxEntry> _outbox = {};
 
@@ -121,6 +128,13 @@ class InMemoryLocalStore implements LocalStore {
       _lastServerTime = time;
 
   @override
+  Future<ClockAnchorRecord?> getClockAnchor() async => _clockAnchor;
+
+  @override
+  Future<void> saveClockAnchor(ClockAnchorRecord anchor) async =>
+      _clockAnchor = anchor;
+
+  @override
   Future<int> nextDeviceSeq() async => ++_deviceSeq;
 
   @override
@@ -143,6 +157,7 @@ class InMemoryLocalStore implements LocalStore {
 
   @override
   Future<void> wipe() async {
+    _clockAnchor = null;
     _queue = const [];
     _services = const [];
     _breaks = const [];

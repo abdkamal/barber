@@ -127,6 +127,48 @@ void main() {
       );
     });
 
+    test('مراجعة F1/F2: uncertain-time results, summary and not-applied / during-suspension items', () async {
+      final api = _manager((r) async {
+        if (r.url.path.endsWith('/recover-events')) {
+          final e = ((jsonDecode(r.body) as Map)['events'] as List).single as Map;
+          return _json({
+            'staffId': 'barber-9',
+            'suspendedAt': '2026-09-24T10:00:03.000Z',
+            'results': [
+              {'eventId': e['id'], 'result': 'rejected_uncertain_time', 'reason': 'UNCERTAIN_TIME'}
+            ],
+            'summary': {'applied': 0, 'duplicate': 0, 'rejectedAfterSuspension': 0, 'rejectedUncertainTime': 1, 'rejectedInvalid': 0},
+          });
+        }
+        return _json([
+          {
+            'id': 'i1', 'staffId': 'barber-9', 'kind': 'recovered', 'status': 'not_applied_uncertain_time',
+            'type': 'payment_confirmed', 'payloadSummary': {'amount': 4500}, 'approximate': true,
+            'reason': 'UNCERTAIN_TIME', 'recoveredAt': '2026-09-24T12:00:00.000Z',
+          },
+          {
+            'id': 'i2', 'staffId': 'barber-9', 'kind': 'during_suspension', 'status': 'applied',
+            'type': 'service_started', 'payloadSummary': {}, 'suspendedAt': '2026-09-24T10:00:00.000Z',
+            'reactivatedAt': '2026-09-24T11:00:00.000Z', 'recoveredBy': null, 'recoveredAt': '2026-09-24T12:00:00.000Z',
+          },
+        ]);
+      });
+      final report = await api.recoverStaffEvents(staffId: 'barber-9', events: [_event(1)]);
+      expect(report.results.single.result, RecoveryResult.rejectedUncertainTime);
+      expect(report.summary.rejectedUncertainTime, 1);
+      expect(report.summary.rejected, 1);
+      expect(report.summary.total, 1);
+      expect(RecoverySummary.of(report.results).rejectedUncertainTime, 1);
+      expect(RecoveryResult.fromWire('rejected_uncertain_time').toWire(), 'rejected_uncertain_time');
+      final items = await api.getRecoveredEvents();
+      expect(items[0].applied, isFalse);
+      expect(items[0].payloadSummary, {'amount': 4500});
+      expect(items[1].kind, RecoveredEventKind.duringSuspension);
+      expect(items[1].applied, isTrue);
+      expect(items[1].reactivatedAt, DateTime.utc(2026, 9, 24, 11));
+      expect(items[1].recoveredByName, isNull);
+    });
+
     test('recovered-events list and acknowledgement', () async {
       final seen = <String>[];
       final api = _manager((r) async {
@@ -158,6 +200,8 @@ void main() {
       expect(items.single.approximate, isTrue);
       expect(items.single.recoveredByName, 'المدير');
       expect(items.single.reviewed, isFalse);
+      expect(items.single.kind, RecoveredEventKind.recovered);
+      expect(items.single.applied, isTrue);
       await api.getRecoveredEvents(all: true);
       await api.acknowledgeRecoveredEvent('item-1');
       expect(seen, [

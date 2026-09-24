@@ -67,13 +67,23 @@ const EFFECTIVE_SCHEDULES = `
           AND NOT EXISTS (SELECT 1 FROM work_schedules o WHERE o.staff_id = s.id AND o.weekday = w.weekday))
    WHERE s.active`;
 
-export async function schedulesOf(q: TenantQueryable, staffId: string): Promise<ScheduleRow[]> {
-  const { rows } = await q.query<ScheduleRow>(`${EFFECTIVE_SCHEDULES} AND s.id = $1`, [staffId]);
+/**
+ * Lookup options for one staff member's schedules. `includeInactive` (ق40 review F3): device events
+ * of a suspended account (manager recovery) or done while it was suspended still belong to the
+ * account's real shift — never NOT_WORKING or the whole calendar day because it is inactive now.
+ */
+export interface ScheduleLookup {
+  includeInactive?: boolean;
+}
+
+export async function schedulesOf(q: TenantQueryable, staffId: string, opts: ScheduleLookup = {}): Promise<ScheduleRow[]> {
+  const sql = opts.includeInactive ? EFFECTIVE_SCHEDULES.replace('WHERE s.active', 'WHERE true') : EFFECTIVE_SCHEDULES;
+  const { rows } = await q.query<ScheduleRow>(`${sql} AND s.id = $1`, [staffId]);
   return rows;
 }
 
-export async function resolveShift(q: TenantQueryable, tz: string, staffId: string, now: number, lookaheadMs: number): Promise<Shift | null> {
-  return currentShift(await schedulesOf(q, staffId), tz, now, lookaheadMs);
+export async function resolveShift(q: TenantQueryable, tz: string, staffId: string, now: number, lookaheadMs: number, opts: ScheduleLookup = {}): Promise<Shift | null> {
+  return currentShift(await schedulesOf(q, staffId, opts), tz, now, lookaheadMs);
 }
 
 /** Statuses that keep a business day "open" for its barber after closing time (C1). */
@@ -141,8 +151,9 @@ export async function operationalShift(
   now: number,
   win: DayWindow,
   schedules?: readonly ScheduleRow[],
+  opts: ScheduleLookup = {},
 ): Promise<Shift | null> {
-  const sch = schedules ?? (await schedulesOf(q, staffId));
+  const sch = schedules ?? (await schedulesOf(q, staffId, opts));
   const cur = currentShift(sch, tz, now, win.lookaheadMs);
   if (cur && now >= cur.workStart) return cur;
   const { rows } = await q.query<{ work_date: string }>(
@@ -160,14 +171,14 @@ export async function operationalShift(
 }
 
 /** Opening time (local) of a staff member's shift on a date — anchors recurring breaks (ق30). */
-export async function opensAtOn(q: TenantQueryable, staffId: string, date: string): Promise<string | null> {
+export async function opensAtOn(q: TenantQueryable, staffId: string, date: string, opts: ScheduleLookup = {}): Promise<string | null> {
   const wd = weekday(date);
-  return (await schedulesOf(q, staffId)).find((r) => r.weekday === wd)?.opens_at ?? null;
+  return (await schedulesOf(q, staffId, opts)).find((r) => r.weekday === wd)?.opens_at ?? null;
 }
 
 /** The shift of a known work date (for events arriving late); falls back to the whole local day. */
-export async function shiftForDate(q: TenantQueryable, tz: string, staffId: string, date: string): Promise<Shift> {
-  return shiftOrDay(await schedulesOf(q, staffId), tz, date);
+export async function shiftForDate(q: TenantQueryable, tz: string, staffId: string, date: string, opts: ScheduleLookup = {}): Promise<Shift> {
+  return shiftOrDay(await schedulesOf(q, staffId, opts), tz, date);
 }
 
 /** Active staff who work (have a schedule on) the current business day — the salon's "barbers" today. */
@@ -309,7 +320,7 @@ export async function loadDay(
   staffId: string,
   shift: Shift,
   now: number,
-  opts: { lock?: boolean; settings?: SettingsRow; staff?: StaffInfo } = {},
+  opts: { lock?: boolean; settings?: SettingsRow; staff?: StaffInfo; includeInactive?: boolean } = {},
 ): Promise<DayCtx> {
   if (opts.lock) {
     await q.query('INSERT INTO barber_days (staff_id, work_date) VALUES ($1, $2) ON CONFLICT (staff_id, work_date) DO NOTHING', [
@@ -326,7 +337,7 @@ export async function loadDay(
   const staff = opts.staff ?? (await staffInfo(q, staffId));
   if (!staff) throw new Error('staff not found');
   const { rows: abs } = await q.query('SELECT 1 FROM absences WHERE staff_id = $1 AND work_date = $2', [staffId, shift.workDate]);
-  const breaks = await loadBreaks(q, salon.timezone, staffId, shift, await opensAtOn(q, staffId, shift.workDate), now);
+  const breaks = await loadBreaks(q, salon.timezone, staffId, shift, await opensAtOn(q, staffId, shift.workDate, { includeInactive: !!opts.includeInactive }), now);
   const { rows } = await q.query<BookingRow>(
     `${BOOKING_SELECT}
       WHERE b.staff_id = $1 AND b.work_date = $2 AND b.status IN ('offered', 'waiting', 'called', 'in_service')

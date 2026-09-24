@@ -188,9 +188,15 @@ class _HoldScreenState extends ConsumerState<HoldScreen> {
       GroupBox(children: [
         ValueRow(first: true, label: 'قُبلت', value: digits('${s.accepted}')),
         ValueRow(label: 'رُفضت لوقوعها بعد الإيقاف', value: digits('${s.rejectedAfterSuspension}')),
+        if (s.rejectedUncertainTime > 0)
+          ValueRow(label: 'لم تُطبّق لعدم التأكد من وقتها', value: digits('${s.rejectedUncertainTime}')),
         if (s.rejectedInvalid > 0)
           ValueRow(label: 'رُفضت لعدم صلاحيتها', value: digits('${s.rejectedInvalid}')),
       ]),
+      // ق40 (مراجعة F1): أُعيد تشغيل الجهاز دون اتصال فوقتها تقريبي — لا تُطبّق، وتُحفظ للمراجعة.
+      if (s.rejectedUncertainTime > 0)
+        const Muted('أُعيد تشغيل الجهاز وهو دون اتصال، فلا يُعرف أوقعت هذه الإجراءات قبل الإيقاف أم بعده. '
+            'لم تُطبّق، وحُفظت في «إجراءات مستردة للمراجعة» لتسجّلها يدويًا إن كانت قد حدثت فعلًا.'),
       if (r.suspendedAt != null) Muted('وقت الإيقاف: ${weekdayAr(r.suspendedAt!)} ${timeAr(r.suspendedAt!)}'),
       SaloniButton(
         label: 'تم',

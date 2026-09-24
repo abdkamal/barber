@@ -40,6 +40,10 @@ class FakeServer {
 
   /// ق40: `GET /manager/recovered-events`، و`ack` يزيل العنصر.
   List<Map<String, dynamic>> recoveredItems = [];
+
+  /// ق40 (مراجعة F1): أنواع أحداث يجيب عنها رفع المدير بـ`rejected_uncertain_time`
+  /// (كأن وقتها تقريبي).
+  Set<String> uncertainTypes = {};
   final List<String> acknowledged = [];
 
   /// آخر جلسة أُصدرت بالدخول (الدور حسب [loginRoles]).
@@ -400,7 +404,9 @@ class FakeServer {
       recoveredUploads.addAll([for (final e in list) {...e, 'staffId': staffId}]);
       final results = [
         for (final e in list)
-          DateTime.parse(e['occurredAt'] as String).isBefore(cut)
+          (uncertainTypes.contains(e['type']) || e['approximate'] == true)
+              ? {'eventId': e['id'], 'result': 'rejected_uncertain_time', 'reason': 'UNCERTAIN_TIME'}
+              : DateTime.parse(e['occurredAt'] as String).isBefore(cut)
               ? {'eventId': e['id'], 'result': 'applied'}
               : {'eventId': e['id'], 'result': 'rejected_after_suspension', 'reason': 'AFTER_SUSPENSION'},
       ];
@@ -413,6 +419,7 @@ class FakeServer {
           'applied': n('applied'),
           'duplicate': 0,
           'rejectedAfterSuspension': n('rejected_after_suspension'),
+          'rejectedUncertainTime': n('rejected_uncertain_time'),
           'rejectedInvalid': 0,
         },
       });

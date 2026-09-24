@@ -12,6 +12,10 @@ enum RecoveryResult {
   /// وقع في وقت الإيقاف أو بعده — لم يُطبّق.
   rejectedAfterSuspension,
 
+  /// وقته تقريبي (أُعيد تشغيل الجهاز دون اتصال) فلا يُعرف أوقع قبل الإيقاف —
+  /// لم يُطبّق، ويبقى في قائمة المراجعة ليسجّله المدير يدويًا إن كان قد حدث.
+  rejectedUncertainTime,
+
   /// غير صالح (نوع مجهول، حجز غير موجود، انتقال ترفضه آلة الحالات…).
   rejectedInvalid;
 
@@ -19,6 +23,7 @@ enum RecoveryResult {
         'applied' => RecoveryResult.applied,
         'duplicate' => RecoveryResult.duplicate,
         'rejected_after_suspension' => RecoveryResult.rejectedAfterSuspension,
+        'rejected_uncertain_time' => RecoveryResult.rejectedUncertainTime,
         'rejected_invalid' => RecoveryResult.rejectedInvalid,
         _ => throw FormatException('Unknown RecoveryResult: $value'),
       };
@@ -27,6 +32,7 @@ enum RecoveryResult {
         RecoveryResult.applied => 'applied',
         RecoveryResult.duplicate => 'duplicate',
         RecoveryResult.rejectedAfterSuspension => 'rejected_after_suspension',
+        RecoveryResult.rejectedUncertainTime => 'rejected_uncertain_time',
         RecoveryResult.rejectedInvalid => 'rejected_invalid',
       };
 }
@@ -45,32 +51,36 @@ class RecoveryOutcome {
       );
 }
 
-/// ملخص رفع الاسترداد: `{applied, duplicate, rejectedAfterSuspension, rejectedInvalid}`.
+/// ملخص رفع الاسترداد:
+/// `{applied, duplicate, rejectedAfterSuspension, rejectedUncertainTime, rejectedInvalid}`.
 class RecoverySummary {
   const RecoverySummary({
     this.applied = 0,
     this.duplicate = 0,
     this.rejectedAfterSuspension = 0,
+    this.rejectedUncertainTime = 0,
     this.rejectedInvalid = 0,
   });
 
   final int applied;
   final int duplicate;
   final int rejectedAfterSuspension;
+  final int rejectedUncertainTime;
   final int rejectedInvalid;
 
-  int get total => applied + duplicate + rejectedAfterSuspension + rejectedInvalid;
+  int get total => applied + duplicate + rejectedAfterSuspension + rejectedUncertainTime + rejectedInvalid;
 
   /// ما وصل إلى السيرفر فعلًا (طُبّق الآن أو من قبل).
   int get accepted => applied + duplicate;
 
-  /// ما لم يُطبّق (بعد الإيقاف أو غير صالح).
-  int get rejected => rejectedAfterSuspension + rejectedInvalid;
+  /// ما لم يُطبّق (بعد الإيقاف، أو بوقت غير مؤكد، أو غير صالح).
+  int get rejected => rejectedAfterSuspension + rejectedUncertainTime + rejectedInvalid;
 
   factory RecoverySummary.fromJson(Map<String, dynamic> json) => RecoverySummary(
         applied: (json['applied'] as num?)?.toInt() ?? 0,
         duplicate: (json['duplicate'] as num?)?.toInt() ?? 0,
         rejectedAfterSuspension: (json['rejectedAfterSuspension'] as num?)?.toInt() ?? 0,
+        rejectedUncertainTime: (json['rejectedUncertainTime'] as num?)?.toInt() ?? 0,
         rejectedInvalid: (json['rejectedInvalid'] as num?)?.toInt() ?? 0,
       );
 
@@ -80,6 +90,7 @@ class RecoverySummary {
       applied: n(RecoveryResult.applied),
       duplicate: n(RecoveryResult.duplicate),
       rejectedAfterSuspension: n(RecoveryResult.rejectedAfterSuspension),
+      rejectedUncertainTime: n(RecoveryResult.rejectedUncertainTime),
       rejectedInvalid: n(RecoveryResult.rejectedInvalid),
     );
   }
@@ -124,11 +135,27 @@ class RecoveryReport {
   }
 }
 
+/// مصدر عنصر المراجعة.
+enum RecoveredEventKind {
+  /// رفعه مدير من جهاز حساب موقوف (ق40).
+  recovered,
+
+  /// وصل بالمزامنة العادية بعد إعادة التفعيل، لكنه وقع أثناء الإيقاف.
+  duringSuspension;
+
+  static RecoveredEventKind fromWire(String? v) =>
+      v == 'during_suspension' ? RecoveredEventKind.duringSuspension : RecoveredEventKind.recovered;
+}
+
 /// عنصر في «إجراءات مستردة للمراجعة» (`GET /manager/recovered-events`).
 class RecoveredEventItem {
   const RecoveredEventItem({
     required this.id,
     required this.staffId,
+    this.kind = RecoveredEventKind.recovered,
+    this.applied = true,
+    this.payloadSummary = const {},
+    this.reactivatedAt,
     this.staffName,
     this.eventId,
     this.type,
@@ -147,6 +174,17 @@ class RecoveredEventItem {
 
   final String id;
   final String staffId;
+  final RecoveredEventKind kind;
+
+  /// `false` = لم يُطبّق لأن وقته غير مؤكد (`status: not_applied_uncertain_time`) —
+  /// يسجّله المدير يدويًا إن كان قد حدث فعلًا.
+  final bool applied;
+
+  /// حقول معروفة من الحدث (المبلغ، الخدمات، الخطوات…) ليسجّله المدير يدويًا.
+  final Map<String, dynamic> payloadSummary;
+
+  /// وقت إعادة التفعيل (لعناصر «أثناء الإيقاف»).
+  final DateTime? reactivatedAt;
   final String? staffName;
   final String? eventId;
 
@@ -172,6 +210,10 @@ class RecoveredEventItem {
     return RecoveredEventItem(
       id: json['id'] as String,
       staffId: json['staffId'] as String,
+      kind: RecoveredEventKind.fromWire(json['kind'] as String?),
+      applied: json['status'] != 'not_applied_uncertain_time',
+      payloadSummary: json['payloadSummary'] is Map ? Map<String, dynamic>.from(json['payloadSummary'] as Map) : const {},
+      reactivatedAt: parseUtcOrNull(json['reactivatedAt'] as String?),
       staffName: json['staffName'] as String?,
       eventId: json['eventId'] as String?,
       type: json['type'] as String?,

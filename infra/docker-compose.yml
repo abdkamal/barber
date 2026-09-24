@@ -21,7 +21,7 @@ services:
       retries: 30
 
   pgbouncer:
-    image: edoburu/pgbouncer:latest
+    image: edoburu/pgbouncer:v1.25.2-p0
     depends_on:
       postgres:
         condition: service_healthy

@@ -15,8 +15,18 @@ need_root() {
   [ "$(id -u)" -eq 0 ] || die "شغّل الأمر بصلاحية الجذر: أضف sudo في أوله (مثال: sudo bash $0)"
 }
 
-# docker compose bound to this deploy directory and its .env
-dc() { docker compose --project-directory "$DEPLOY_DIR" -f "$DEPLOY_DIR/docker-compose.yml" --env-file "$ENV_FILE" "$@"; }
+# docker compose bound to this deploy directory and its .env.
+# Edge mode (SALONI_EDGE_NETWORK set): another proxy owns 80/443, so Saloni's Caddy stays off and the
+# API joins that proxy's network. Otherwise the "own-proxy" profile starts Saloni's Caddy.
+dc() {
+  if [ -n "$(env_get SALONI_EDGE_NETWORK)" ]; then
+    docker compose --project-directory "$DEPLOY_DIR" -f "$DEPLOY_DIR/docker-compose.yml" \
+      -f "$DEPLOY_DIR/docker-compose.edge.yml" --env-file "$ENV_FILE" "$@"
+  else
+    COMPOSE_PROFILES=own-proxy docker compose --project-directory "$DEPLOY_DIR" \
+      -f "$DEPLOY_DIR/docker-compose.yml" --env-file "$ENV_FILE" "$@"
+  fi
+}
 
 env_get() { # KEY → value from deploy/.env (empty if absent)
   [ -f "$ENV_FILE" ] || return 0

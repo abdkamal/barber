@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 
 import '../api_client.dart';
 import '../models/models.dart';
+import 'boot_clock.dart';
 import 'connection_state.dart';
 import 'local_store.dart';
 import 'monotonic_clock.dart';
@@ -28,11 +29,13 @@ class StaffSyncEngine {
     required this.api,
     required this.store,
     MonotonicClock? clock,
+    BootClock? bootClock,
     Uuid? uuid,
     this.heartbeatInterval = const Duration(seconds: 30),
     void Function(List<SyncChange> changes)? onChanges,
     DateTime Function()? now,
   })  : clock = clock ?? MonotonicClock(),
+        bootClock = bootClock ?? const NoBootClock(),
         _uuid = uuid ?? const Uuid(),
         _onChanges = onChanges,
         _now = now ?? (() => DateTime.now().toUtc()) {
@@ -47,6 +50,18 @@ class StaffSyncEngine {
   final ApiClient api;
   final LocalStore store;
   final MonotonicClock clock;
+
+  /// ق40 مراجعة F1: ساعة «منذ تشغيل الجهاز» (قناة منصة في التطبيق، مزيفة في
+  /// الاختبارات) — تجعل الأوقات دقيقة بعد إعادة فتح التطبيق دون إعادة تشغيل الجهاز.
+  final BootClock bootClock;
+
+  Future<BootReading?> _readBoot() async {
+    try {
+      return await bootClock.read();
+    } catch (_) {
+      return null;
+    }
+  }
   final Duration heartbeatInterval;
   final Uuid _uuid;
   final void Function(List<SyncChange> changes)? _onChanges;
@@ -114,9 +129,16 @@ class StaffSyncEngine {
   Future<void> start() async {
     if (_started) return;
     _started = true;
-    final lastServerTime = await store.getLastServerTime();
-    if (lastServerTime != null && !clock.hasAnchor) {
-      clock.restoreAnchor(lastServerTime);
+    if (!clock.hasAnchor) {
+      final saved = await store.getClockAnchor();
+      final lastServerTime = saved?.serverTime ?? await store.getLastServerTime();
+      if (lastServerTime != null) {
+        clock.restoreAnchor(
+          lastServerTime,
+          savedBoot: saved?.boot,
+          currentBoot: await _readBoot(),
+        );
+      }
     }
     await _emitPendingCount();
     unawaited(sync());
@@ -182,7 +204,9 @@ class StaffSyncEngine {
         cursor = pull.seq;
         await store.saveSyncCursor(cursor);
       } while (pull.hasMore && pull.changes.isNotEmpty);
-      clock.anchor(pull.serverTime);
+      final boot = await _readBoot();
+      clock.anchor(pull.serverTime, boot: boot);
+      await store.saveClockAnchor(ClockAnchorRecord(pull.serverTime, boot: boot));
       await store.saveLastServerTime(pull.serverTime);
       hasConnected = true;
       hasAttempted = true;
@@ -205,7 +229,7 @@ class StaffSyncEngine {
     Map<String, dynamic> payload = const {},
   }) async {
     final deviceSeq = await store.nextDeviceSeq();
-    final reading = clock.now();
+    final reading = clock.now(await _readBoot());
     final event = DeviceEvent(
       id: _uuid.v4(),
       deviceSeq: deviceSeq,
