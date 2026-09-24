@@ -1,0 +1,9 @@
+{
+  "name": "saloni",
+  "private": true,
+  "workspaces": ["packages/engine", "server"],
+  "scripts": {
+    "test": "npm test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
