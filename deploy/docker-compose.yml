@@ -1,0 +1,120 @@
+# Saloni — trial deployment on a single VPS (DEV build for user trial; not the release).
+# Only Caddy is public (80/443, automatic HTTPS). PostgreSQL, PgBouncer and the API stay on the
+# internal Docker network. Values come from deploy/.env (created once by install.sh).
+name: saloni
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_USER: saloni
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD missing - run deploy/install.sh}
+      POSTGRES_DB: postgres
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --encoding=UTF8 --locale=C.UTF-8"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saloni -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # No DB_NAME => wildcard "* = host=postgres": salon databases created at runtime are reachable.
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: saloni
+      DB_PASSWORD: ${PG_PASSWORD}
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "1000"
+      DEFAULT_POOL_SIZE: "5"
+      MAX_DB_CONNECTIONS: "20"
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,options
+      LOG_CONNECTIONS: "0"
+      LOG_DISCONNECTIONS: "0"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U saloni -d postgres || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: saloni-server:local
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    # The entrypoint applies migrations (directory + every salon DB) before starting the API.
+    command: ["serve"]
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      PG_HOST: pgbouncer
+      PG_PORT: "5432"
+      PG_USER: saloni
+      PG_PASSWORD: ${PG_PASSWORD}
+      PG_ADMIN_HOST: postgres
+      PG_ADMIN_PORT: "5432"
+      PG_ADMIN_USER: saloni
+      PG_ADMIN_PASSWORD: ${PG_PASSWORD}
+      PG_ADMIN_MAINTENANCE_DB: postgres
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET missing - run deploy/install.sh}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET missing - run deploy/install.sh}
+      RESET_CODE_PEPPER: ${RESET_CODE_PEPPER:?RESET_CODE_PEPPER missing - run deploy/install.sh}
+      # Caddy is the only hop in front of the API and overwrites X-Forwarded-For with the real client IP.
+      TRUST_PROXY: "1"
+      STORAGE_DIR: /data/storage
+      SCHEDULER_ENABLED: "true"
+      # Push (FCM) is OFF for the trial: no Firebase credentials; the apps poll / use the WebSocket.
+      FCM_SERVICE_ACCOUNT_FILE: ""
+      FCM_PROJECT_ID: ""
+      FCM_CLIENT_EMAIL: ""
+      FCM_PRIVATE_KEY: ""
+    volumes:
+      - media:/data/storage
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SALONI_DOMAIN: ${SALONI_DOMAIN:?SALONI_DOMAIN missing - run deploy/install.sh}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  media:
+  caddy_data:
+  caddy_config:

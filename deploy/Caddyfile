@@ -1,0 +1,14 @@
+# Saloni — public entry point. Caddy obtains and renews the HTTPS certificate automatically
+# (Let's Encrypt) for SALONI_DOMAIN, redirects HTTP → HTTPS, and proxies everything to the API.
+{$SALONI_DOMAIN} {
+	encode gzip
+	# Photo uploads are ≤ 5 MB (+ multipart overhead).
+	request_body {
+		max_size 6MB
+	}
+	# WebSocket upgrades (/v1/staff/stream) are proxied transparently by reverse_proxy.
+	reverse_proxy server:3000 {
+		# Overwrite (never append) the client IP the API uses for rate limits and login backoff.
+		header_up X-Forwarded-For {remote_host}
+	}
+}

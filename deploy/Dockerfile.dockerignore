@@ -1,0 +1,17 @@
+# Build context is the repo root; only packages/engine, server and the entrypoint are needed.
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+.git
+apps
+design
+docs
+e2e
+infra
+packages/saloni_api
+packages/saloni_ui
+server/storage-data
+server/coverage
+deploy/.env
+deploy/backups
