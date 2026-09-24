@@ -1,0 +1,143 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:saloni_api/saloni_api.dart' as sa;
+import 'package:saloni_ui/saloni_ui.dart';
+
+import '../../core/format.dart';
+import '../../state/app_services.dart';
+import '../common/ui.dart';
+
+/// مساعدات قراءة JSON المدير (api.md لا يفصّل الأشكال؛ القراءة متسامحة).
+
+String barberId(Map<String, dynamic> b) =>
+    str(b, ['barberId', 'id']).isNotEmpty ? str(b, ['barberId', 'id']) : str(b['barber'], ['id']);
+
+String barberName(Map<String, dynamic> b) =>
+    str(b, ['barberName', 'name'], str(b['barber'], ['name'], 'حلاق'));
+
+sa.BarberDayState? dayStateOf(Map<String, dynamic> b) {
+  final v = str(b, ['dayState', 'state'], str(b['barber'], ['dayState']));
+  try {
+    return v.isEmpty ? null : sa.BarberDayState.fromWire(v);
+  } catch (_) {
+    return null;
+  }
+}
+
+sa.BookingStatus statusOf(Map<String, dynamic> q) {
+  try {
+    return sa.BookingStatus.fromWire(str(q, ['status'], 'waiting'));
+  } catch (_) {
+    return sa.BookingStatus.waiting;
+  }
+}
+
+String servicesText(Map<String, dynamic> q) {
+  final names = q['serviceNames'] ?? q['services'];
+  if (names is List) {
+    return names.map((e) => e is Map ? (e['name'] ?? '') : e).join(' + ');
+  }
+  if (names is String) return names;
+  return 'خدمة';
+}
+
+String etaText(Map<String, dynamic> q) {
+  final t = DateTime.tryParse(str(q, ['eta', 'expectedStart', 'originalEta']));
+  return t == null ? '—' : hhmm(t);
+}
+
+/// شارة حالة يوم الحلاق (design.md §4).
+class DayStateBadge extends StatelessWidget {
+  const DayStateBadge({super.key, required this.state});
+  final sa.BarberDayState? state;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, tone) = switch (state) {
+      sa.BarberDayState.connected => ('متصل', SaloniTone.success),
+      sa.BarberDayState.disconnected => ('منقطع', SaloniTone.warning),
+      sa.BarberDayState.absentToday => ('غائب اليوم', SaloniTone.danger),
+      sa.BarberDayState.notConnectedYet => ('لم يتصل بعد', SaloniTone.neutral),
+      null => ('—', SaloniTone.neutral),
+    };
+    return StatusBadge(status: BookingStatus.waiting, small: true, label: label, tone: tone);
+  }
+}
+
+/// تنبيه «صالونك بانتظار التفعيل» (ق37).
+class PendingActivationBanner extends ConsumerWidget {
+  const PendingActivationBanner({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final salon = ref.watch(authProvider).salon;
+    if (salon == null || !salon.pendingActivation) return const SizedBox.shrink();
+    return const SaloniBanner(
+      tone: SaloniBannerTone.info,
+      title: 'صالونك بانتظار التفعيل',
+      body: 'لا يظهر للزبائن قبل تفعيله من فريق صالوني. أكمل ملفه وخدماته في الأثناء.',
+    );
+  }
+}
+
+/// حوار إدخال نصي/رقمي بسيط بأسلوب نظام التصميم.
+Future<String?> promptText(
+  BuildContext context, {
+  required String title,
+  required String label,
+  String initial = '',
+  SaloniTextFieldType type = SaloniTextFieldType.text,
+  TextDirection? direction,
+  String? hint,
+  String confirm = 'حفظ',
+}) async {
+  final ctrl = TextEditingController(text: initial);
+  final ok = await showSaloniSheet<bool>(context, (ctx) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SectionTitle(title),
+        const SizedBox(height: 16),
+        SaloniTextField(label: label, controller: ctrl, type: type, textDirection: direction, hint: hint),
+        const SizedBox(height: 20),
+        SaloniButton(label: confirm, block: true, onPressed: () => Navigator.of(ctx).pop(true)),
+      ],
+    );
+  });
+  return ok == true ? ctrl.text : null;
+}
+
+/// عرض رمز لمرة واحدة (إعادة التعيين) بخط الرموز.
+Future<void> showOneTimeCode(BuildContext context, String who, String code, {String? expires}) {
+  return showSaloniSheet<void>(context, (ctx) {
+    final c = ctx.saloniColors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SectionTitle('رمز إعادة التعيين — $who'),
+        const SizedBox(height: 8),
+        const Muted('سلّمه لصاحبه ليعيّن كلمة مرور جديدة. صالح لمرة واحدة خلال 24 ساعة، '
+            'وتُلغى كل جلساته. لا يُعرض مرة أخرى.'),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: c.surfaceSunken,
+            borderRadius: SaloniRadius.mdAll,
+            border: Border.all(color: c.line),
+          ),
+          alignment: Alignment.center,
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: SelectableText(code, style: SaloniTextStyles.code.copyWith(color: c.ink, fontSize: 22)),
+          ),
+        ),
+        if (expires != null) ...[const SizedBox(height: 8), Muted(expires, center: true)],
+        const SizedBox(height: 20),
+        SaloniButton(label: 'تم', block: true, onPressed: () => Navigator.of(ctx).pop()),
+      ],
+    );
+  });
+}

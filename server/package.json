@@ -8,6 +8,8 @@
     "node": ">=22"
   },
   "scripts": {
+    "build:engine": "npm run build -w @saloni/engine",
+    "prebuild": "npm run build:engine",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "start:dev": "ts-node --transpile-only src/main.ts",
@@ -15,12 +17,14 @@
     "migrate": "ts-node --transpile-only src/cli/migrate.ts",
     "vendor": "ts-node --transpile-only src/cli/vendor.ts",
     "test": "jest --config jest.config.js",
-    "test:int": "jest --config jest.int.config.js --runInBand"
+    "test:int": "jest --config jest.int.config.js --runInBand",
+    "prestart:dev": "npm run build:engine"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",
+    "@saloni/engine": "0.1.0",
     "argon2": "^0.44.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",

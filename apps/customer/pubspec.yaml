@@ -1,0 +1,37 @@
+name: customer
+description: "صالوني — احجز دوري: تطبيق الزبون."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  saloni_ui:
+    path: ../../packages/saloni_ui
+  saloni_api:
+    path: ../../packages/saloni_api
+
+  flutter_riverpod: ^2.6.1
+  shared_preferences: ^2.3.3
+  flutter_secure_storage: ^9.2.2
+  url_launcher: ^6.3.1
+  mobile_scanner: ^6.0.7
+  firebase_core: ^3.8.1
+  firebase_messaging: ^15.1.6
+  permission_handler: ^11.3.1
+  google_api_availability: ^5.0.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
