@@ -36,14 +36,13 @@ void main() {
       await teardownApp(tester, h);
     });
 
-    testWidgets('بعد التأجيل: لا تأجيل ثانٍ، و«لم يحضر» متاح', (tester) async {
+    testWidgets('بعد التأجيل: «لم يحضر» متاح فورًا', (tester) async {
       final server = FakeServer()
         ..booking(id: 'b1', name: 'فهد القحطاني', status: 'called', position: 1, postponementUsed: true);
       final h = await pumpStaffApp(tester, server);
 
       await tester.tap(find.text('لم يصل بعد؟'));
       await settle(tester);
-      expect(find.byKey(const Key('late-postpone')), findsNothing);
       expect(_button(tester, 'late-noshow').onPressed, isNotNull);
 
       await tester.tap(find.byKey(const Key('late-noshow')));
@@ -52,6 +51,50 @@ void main() {
       expect(find.text('فهد القحطاني'), findsNothing);
       await teardownApp(tester, h);
     });
+
+    testWidgets(
+      'بعد التأجيل بلا تصريح صريح من السيرفر (canPostpone غائب): الزر يظهر '
+      'محليًا (القرار للسيرفر)، ورفضه يظهر برسالة عربية واضحة',
+      (tester) async {
+        final server = FakeServer()
+          ..booking(id: 'b1', name: 'فهد القحطاني', status: 'called', position: 1, postponementUsed: true);
+        server.rejectPostponeForBookingIds.add('b1');
+        final h = await pumpStaffApp(tester, server);
+
+        await tester.tap(find.text('لم يصل بعد؟'));
+        await settle(tester);
+        // canPostpone غير معروف (null): لا حظر محلي صارم — الزر يظهر.
+        expect(find.byKey(const Key('late-postpone')), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('late-postpone')));
+        await settle(tester);
+
+        // السيرفر رفض الحدث؛ يظهر تنبيه واضح للحلاق بدل أن يختفي بصمت.
+        expect(find.text('رفض السيرفر بعض الإجراءات'), findsOneWidget);
+        expect(find.textContaining('التأجيل مستخدم مسبقًا'), findsOneWidget);
+        await teardownApp(tester, h);
+      },
+    );
+
+    testWidgets(
+      'ق23: canPostpone=true من السيرفر يتيح تأجيلًا ثانيًا رغم postponementUsed',
+      (tester) async {
+        final server = FakeServer()
+          ..booking(id: 'b1', name: 'فهد القحطاني', status: 'called', position: 1, postponementUsed: true, canPostpone: true);
+        final h = await pumpStaffApp(tester, server);
+
+        await tester.tap(find.text('لم يصل بعد؟'));
+        await settle(tester);
+        // مُعفى صراحة: زر التأجيل يظهر رغم استخدام التأجيل سابقًا.
+        expect(find.byKey(const Key('late-postpone')), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('late-postpone')));
+        await settle(tester);
+        final e = server.events.singleWhere((e) => e['type'] == 'postponed');
+        expect(e['bookingId'], 'b1');
+        await teardownApp(tester, h);
+      },
+    );
 
     testWidgets('«انتظاره قليلًا» يسجّل waited', (tester) async {
       final server = FakeServer()..booking(id: 'b1', name: 'فهد القحطاني', status: 'called', position: 1);

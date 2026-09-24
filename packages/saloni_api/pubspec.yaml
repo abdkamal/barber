@@ -17,6 +17,8 @@ dependencies:
   uuid: ^4.5.1
   meta: ^1.15.0
   async: ^2.11.0
+  # تحويل الأوقات إلى توقيت الصالون (design.md §2؛ لا تظهر بتوقيت الجهاز).
+  timezone: ^0.9.4
 
   # Used only by lib/staff_sync.dart (still pure-Dart-testable via drift's
   # native/FFI backend; see README for the SQLCipher notes).

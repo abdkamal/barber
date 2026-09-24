@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -99,6 +101,7 @@ class AuthController extends ChangeNotifier {
   /// يحفظ بيانات الصالون والحساب القادمة مع الجلسة (دخول/تسجيل).
   Future<void> _adoptSession(sa.Session session) async {
     salon = SalonMeta.fromInfo(session.salon);
+    salonTimezone = salon?.timezone ?? sa.defaultSalonTimezone;
     await services.prefs.setSalon(salon);
     final name = session.account?.name;
     if (name != null) {
@@ -115,6 +118,7 @@ class AuthController extends ChangeNotifier {
         salon = s.salon.name != null
             ? SalonMeta.fromInfo(s.salon)
             : (services.prefs.salon ?? SalonMeta(code: s.salonCode));
+        salonTimezone = salon?.timezone ?? sa.defaultSalonTimezone;
         accountName = services.prefs.accountName;
         status = AuthStatus.signedIn;
         sessionKey++;
@@ -163,6 +167,7 @@ class AuthController extends ChangeNotifier {
     try {
       final info = await services.api.getSessionInfo();
       salon = SalonMeta.fromInfo(info.salon);
+      salonTimezone = salon?.timezone ?? sa.defaultSalonTimezone;
       await services.prefs.setSalon(salon);
       notifyListeners();
     } on sa.ApiError catch (_) {
@@ -181,6 +186,7 @@ class AuthController extends ChangeNotifier {
     await services.prefs.rememberLogin(session.salonCode, owner['username'].toString());
     await _adoptSession(session);
     salon = SalonMeta.fromInfo(reg.salon);
+    salonTimezone = salon?.timezone ?? sa.defaultSalonTimezone;
     await services.prefs.setSalon(salon);
     role = session.role;
     return reg.salon.code;
@@ -213,16 +219,31 @@ class AuthController extends ChangeNotifier {
     _clear();
   }
 
-  /// انتهت الجلسة (فشل التجديد): نعود لشاشة الدخول دون مسح الأحداث غير
-  /// المُزامنة؛ تُرسل بعد دخول الحساب نفسه، وتُمسح إن دخل حساب آخر.
+  /// انتهت الجلسة: تجديد رفضه السيرفر (401/403) — يشمل حسابًا أُوقف
+  /// (`ACCOUNT_SUSPENDED` تُلغي جلساته فيصل السيرفر لاحقًا بـ401، design.md
+  /// §7) أو جلسة أُبطلت. **تُمسح قاعدة SQLCipher المحلية ومفتاحها فورًا**
+  /// (design.md §6.1: «يُمسح عند الخروج أو إيقاف الحساب») — لا تنتظر خروجًا
+  /// صريحًا؛ بيانات طابور حساب لم يعد صالحًا لا تبقى على الجهاز.
   void _forcedSignOut() {
     if (status != AuthStatus.signedIn) return;
+    unawaited(_wipeLocalStoreOnForcedSignOut());
     _clear();
+  }
+
+  Future<void> _wipeLocalStoreOnForcedSignOut() async {
+    try {
+      final h = await services.storage.openLocalStore();
+      await h.destroy();
+      await services.device.stopKeepAlive();
+    } catch (e) {
+      debugPrint('forced sign-out wipe failed: $e');
+    }
   }
 
   void _clear() {
     role = null;
     salon = null;
+    salonTimezone = sa.defaultSalonTimezone;
     accountName = null;
     status = AuthStatus.signedOut;
     sessionKey++;

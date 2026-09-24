@@ -266,8 +266,12 @@ class BarberRepository extends ChangeNotifier {
     _refreshing = true;
     try {
       // تحديث يدوي أو بعد عودة الاتصال: أرسل كل المعلّق الآن متجاوزًا مهلة
-      // التراجع الأُسّي.
-      await engine.outbox.flush(force: true);
+      // التراجع الأُسّي — عبر `engine.flushNow()` لا `outbox.flush` مباشرة،
+      // فهي الوحيدة التي تنتظر أي دورة مزامنة جارية (`_tickInFlight`) فلا
+      // يتزامن إرسالان معًا (design.md §6.2).
+      final beforeFlush = {for (final o in await engine.store.getOutbox()) o.event.id: o.event};
+      final flushResult = await engine.flushNow();
+      _recordRejected(flushResult.rejected, beforeFlush);
       final today = await api.getStaffToday();
       // ق24: حجوزات متوقعة بعد الإغلاق وتنتظر قرار الحلاق.
       final warnings = today.closingWarnings.toSet();
@@ -302,7 +306,7 @@ class BarberRepository extends ChangeNotifier {
       // إعادة تطبيق ما لم يُرسل بعد فوق حالة السيرفر.
       final outbox = await engine.store.getOutbox();
       for (final o in outbox) {
-        fresh = applyEvent(fresh, o.event, services, _now());
+        fresh = applyEvent(fresh, o.event, services, _now(), breaks: breaks, walkInOnly: walkInOnly);
       }
       entries = fresh;
       pending = outbox.length;
@@ -342,7 +346,7 @@ class BarberRepository extends ChangeNotifier {
     final engine = _engine;
     if (engine == null) return null;
     final event = await engine.recordEvent(type, bookingId: bookingId, payload: payload);
-    entries = applyEvent(entries, event, services, _now());
+    entries = applyEvent(entries, event, services, _now(), breaks: breaks, walkInOnly: walkInOnly);
     pending = await engine.outbox.pendingCount();
     if (link == LinkStatus.online) {
       // نرسل في الخلفية؛ الواجهة لا تنتظر الشبكة.
@@ -357,10 +361,43 @@ class BarberRepository extends ChangeNotifier {
   Future<void> _flushSoon() async {
     final engine = _engine;
     if (engine == null || _disposed) return;
+    final beforeFlush = {for (final o in await engine.store.getOutbox()) o.event.id: o.event};
     // إرسال فوري (يتجاوز التراجع) ثم نبضة وسحب — المحرك يحدّث الشريط والعدد.
     final r = await engine.flushNow();
     if (_disposed) return;
     pending = r.remaining;
+    _recordRejected(r.rejected, beforeFlush);
+    _notify();
+  }
+
+  /// أحداث رفضها السيرفر في آخر إرسال (انتقال غير صالح — design.md §6.2)،
+  /// لتُعرض للحلاق برسالة عربية واضحة بدل أن تختفي بصمت.
+  List<RejectedEvent> lastRejectedEvents = const [];
+
+  void _recordRejected(
+    List<sa.SyncEventOutcome> rejected, [
+    Map<String, sa.DeviceEvent> eventsById = const {},
+  ]) {
+    if (rejected.isEmpty) return;
+    lastRejectedEvents = [
+      ...lastRejectedEvents,
+      for (final o in rejected)
+        RejectedEvent(
+          eventId: o.eventId,
+          type: eventsById[o.eventId]?.type,
+          bookingId: eventsById[o.eventId]?.bookingId,
+          customerName: eventsById[o.eventId]?.bookingId == null
+              ? null
+              : entries.where((e) => e.id == eventsById[o.eventId]!.bookingId).firstOrNull?.name,
+          reason: o.reason,
+        ),
+    ];
+  }
+
+  /// يمسح الأحداث المرفوضة بعد عرضها للحلاق (مثلًا بعد إغلاق شريط تنبيه).
+  void clearRejectedEvents() {
+    if (lastRejectedEvents.isEmpty) return;
+    lastRejectedEvents = const [];
     _notify();
   }
 
@@ -374,10 +411,15 @@ class BarberRepository extends ChangeNotifier {
       _record(sa.DeviceEventType.servicesChanged,
           bookingId: bookingId, payload: {'serviceIds': serviceIds});
 
-  /// ق10/ق21: مرة واحدة فقط.
+  /// ق10/ق21: مرة واحدة فقط — إلا أن يُعفى الحجز صراحة (ق23: تقديم مفاجئ).
+  /// إن استُخدم التأجيل ولم يصرّح السيرفر بإعفاء (`canPostpone == false`)
+  /// يُمنع محليًا؛ إن كان معفًى (`true`) أو غير معروف بعد (`null`، السيرفر لم
+  /// يرسل الحقل) يُسمح محليًا ويُترك القرار النهائي للسيرفر — رفضه يظهر
+  /// للحلاق برسالة واضحة (انظر `lastRejectedEvents`).
   Future<void> postpone(String bookingId, int steps) async {
     final e = entries.where((x) => x.id == bookingId).firstOrNull;
-    if (e == null || e.postponementUsed) {
+    if (e == null) throw StateError('الحجز غير موجود');
+    if (e.postponementUsed && e.canPostpone == false) {
       throw StateError('التأجيل مستخدم لهذا الحجز');
     }
     await _record(sa.DeviceEventType.postponed,

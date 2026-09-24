@@ -22,6 +22,7 @@ class HomeShell extends StatefulWidget {
     required this.api,
     required this.salonCode,
     required this.salonName,
+    required this.timezone,
     required this.currency,
     required this.savedSalons,
     required this.isDark,
@@ -37,6 +38,7 @@ class HomeShell extends StatefulWidget {
   final CustomerApi api;
   final String salonCode;
   final String salonName;
+  final String timezone;
   final String currency;
   final List<SalonSession> savedSalons;
   final bool isDark;
@@ -73,6 +75,7 @@ class _HomeShellState extends State<HomeShell> {
               key: ValueKey(_bookingRefreshKey),
               api: widget.api,
               currency: widget.currency,
+              timezone: widget.timezone,
               fcmMessages: widget.fcmMessages,
               onBookingChanged: _refreshBookingTab,
             ),
@@ -80,7 +83,7 @@ class _HomeShellState extends State<HomeShell> {
         ],
       ),
       AboutSalonScreen(api: widget.api, salonCode: widget.salonCode, showContinueCta: false),
-      HistoryScreen(api: widget.api, currency: widget.currency),
+      HistoryScreen(api: widget.api, currency: widget.currency, timezone: widget.timezone),
       AccountScreen(
         activeCode: widget.salonCode,
         savedSalons: widget.savedSalons,
@@ -115,12 +118,14 @@ class _BookingOrTrackingTab extends StatefulWidget {
     super.key,
     required this.api,
     required this.currency,
+    required this.timezone,
     required this.fcmMessages,
     required this.onBookingChanged,
   });
 
   final CustomerApi api;
   final String currency;
+  final String timezone;
   final Stream<void>? fcmMessages;
   final VoidCallback onBookingChanged;
 
@@ -161,6 +166,7 @@ class _BookingOrTrackingTabState extends State<_BookingOrTrackingTab> {
       return BookScreen(
         api: widget.api,
         currency: widget.currency,
+        timezone: widget.timezone,
         onBooked: (booking) {
           widget.onBookingChanged();
           setState(() {
@@ -171,6 +177,7 @@ class _BookingOrTrackingTabState extends State<_BookingOrTrackingTab> {
     }
     return TrackScreen(
       api: widget.api,
+      timezone: widget.timezone,
       externalRefresh: widget.fcmMessages,
       onNoActiveBooking: () {
         if (mounted) setState(() => _hasActive = false);
@@ -181,6 +188,7 @@ class _BookingOrTrackingTabState extends State<_BookingOrTrackingTab> {
             builder: (_) => ChangeTimeScreen(
               api: widget.api,
               current: current,
+              timezone: widget.timezone,
               onChanged: (b) => Navigator.of(context).pop(b),
             ),
           ),
@@ -193,6 +201,7 @@ class _BookingOrTrackingTabState extends State<_BookingOrTrackingTab> {
         bookingId: current.booking.id,
         barberName: current.barber?.name ?? 'حلاقك',
         eta: current.eta,
+        timezone: widget.timezone,
         onCancelled: () {
           widget.onBookingChanged();
           setState(() => _hasActive = false);

@@ -14,6 +14,7 @@ class SessionState {
     this.savedSalons = const [],
     this.activeCode,
     this.activeName,
+    this.activeTimezone,
     this.api,
     this.errorMessage,
   });
@@ -22,6 +23,10 @@ class SessionState {
   final List<SalonSession> savedSalons;
   final String? activeCode;
   final String? activeName;
+
+  /// المنطقة الزمنية للصالون الفعّال (design.md §2) — تُعرض بها كل الأوقات،
+  /// لا بتوقيت الجهاز (I5). افتراضي `Asia/Riyadh` إن غابت.
+  final String? activeTimezone;
   final CustomerApi? api;
   final String? errorMessage;
 
@@ -30,6 +35,7 @@ class SessionState {
     List<SalonSession>? savedSalons,
     String? activeCode,
     String? activeName,
+    String? activeTimezone,
     CustomerApi? api,
     String? errorMessage,
     bool clearError = false,
@@ -39,6 +45,7 @@ class SessionState {
         savedSalons: savedSalons ?? this.savedSalons,
         activeCode: activeCode ?? this.activeCode,
         activeName: activeName ?? this.activeName,
+        activeTimezone: activeTimezone ?? this.activeTimezone,
         api: api ?? this.api,
         errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       );
@@ -78,6 +85,7 @@ class SessionController extends StateNotifier<SessionState> {
       savedSalons: salons,
       activeCode: code,
       activeName: saved.name,
+      activeTimezone: saved.session.salon.timezone,
       api: api,
     );
     await _confirmActiveAccount(api, code);
@@ -171,6 +179,7 @@ class SessionController extends StateNotifier<SessionState> {
       savedSalons: salons,
       activeCode: salonCode,
       activeName: name,
+      activeTimezone: session.salon.timezone,
       api: api,
     );
     await _confirmActiveAccount(api, salonCode);

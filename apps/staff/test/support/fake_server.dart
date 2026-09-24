@@ -10,6 +10,14 @@ class FakeServer {
 
   String role;
   bool online = true;
+
+  /// يحاكي جلسة أُلغيت (حساب أُوقف أو رمز تجديد أُبطل، design.md §7): كل
+  /// الطلبات تعيد 401، وتجديد الرمز يعيد 401 أيضًا فيُلغي `ApiClient` الجلسة.
+  bool sessionRevoked = false;
+
+  /// معرّفات حجوزات يرفض السيرفر الوهمي حدث `postponed` عليها (لمحاكاة رفض
+  /// حقيقي — ق23/design.md §6.2 — عندما لا يُصرَّح بإعفاء `canPostpone`).
+  final Set<String> rejectPostponeForBookingIds = {};
   int seq = 10;
   final DateTime now = DateTime.now().toUtc();
 
@@ -43,6 +51,7 @@ class FakeServer {
     int position = 1,
     int etaInMin = 30,
     bool postponementUsed = false,
+    bool? canPostpone,
     bool walkIn = false,
     int? startedMinAgo,
     int durationMin = 30,
@@ -55,6 +64,7 @@ class FakeServer {
       position: position,
       etaInMin: etaInMin,
       postponementUsed: postponementUsed,
+      canPostpone: canPostpone,
       walkIn: walkIn,
       startedMinAgo: startedMinAgo,
       durationMin: durationMin,
@@ -72,6 +82,7 @@ class FakeServer {
     int position = 1,
     int etaInMin = 30,
     bool postponementUsed = false,
+    bool? canPostpone,
     bool walkIn = false,
     int? startedMinAgo,
     int durationMin = 30,
@@ -94,6 +105,7 @@ class FakeServer {
       'originalEta': now.add(Duration(minutes: etaInMin)).toIso8601String(),
       'lastShownEta': null,
       'postponementUsed': postponementUsed,
+      if (canPostpone != null) 'canPostpone': canPostpone,
       'actualStart': startedMinAgo == null
           ? null
           : now.subtract(Duration(minutes: startedMinAgo)).toIso8601String(),
@@ -171,6 +183,12 @@ class FakeServer {
           headers: {'content-type': 'application/json; charset=utf-8'},
         );
 
+    if (sessionRevoked && path != '/auth/staff/login') {
+      return json({
+        'error': {'code': 'ACCOUNT_SUSPENDED', 'message': 'الحساب موقوف'}
+      }, 401);
+    }
+
     switch ('${req.method} $path') {
       case 'POST /auth/staff/login':
       case 'POST /auth/refresh':
@@ -215,7 +233,11 @@ class FakeServer {
         final list = (body()['events'] as List).cast<Map<String, dynamic>>();
         events.addAll(list);
         return json([
-          for (final e in list) {'eventId': e['id'], 'result': 'applied'},
+          for (final e in list)
+            if (e['type'] == 'postponed' && rejectPostponeForBookingIds.contains(e['bookingId']))
+              {'eventId': e['id'], 'result': 'rejected', 'reason': 'التأجيل مستخدم مسبقًا لهذا الحجز'}
+            else
+              {'eventId': e['id'], 'result': 'applied'},
         ]);
       case 'GET /sync':
         return json({

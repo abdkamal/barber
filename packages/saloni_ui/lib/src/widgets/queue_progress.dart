@@ -26,9 +26,32 @@ class QueueProgress extends StatelessWidget {
   final String? updated;
   final String? note;
 
+  /// أقصى عدد نقاط «منجزة» تُعرض فرديًا قبل ضغطها في شريحة واحدة.
+  static const maxDoneDots = 4;
+
+  /// أقصى عدد نقاط «متبقية» تُعرض فرديًا قبل ضغطها في شريحة واحدة.
+  static const maxAheadDots = 6;
+
+  /// يحسب عدد النقاط الفردية وهل تُضاف شريحة مضغوطة لكل جهة — دالة نقية
+  /// قابلة للاختبار بمعزل عن الودجت (ق39: نقاط دون أرقام حتى مع طابور طويل).
+  static ({int doneDots, bool doneCompressed, int aheadDots, bool aheadCompressed}) segments({
+    required int done,
+    required int ahead,
+  }) {
+    final doneCompressed = done > maxDoneDots;
+    final aheadCompressed = ahead > maxAheadDots;
+    return (
+      doneDots: doneCompressed ? maxDoneDots - 1 : done,
+      doneCompressed: doneCompressed,
+      aheadDots: aheadCompressed ? maxAheadDots - 1 : ahead,
+      aheadCompressed: aheadCompressed,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.saloniColors;
+    final seg = segments(done: done, ahead: ahead);
     return Semantics(
       label: 'تقدّم الطابور',
       container: true,
@@ -73,12 +96,24 @@ class QueueProgress extends StatelessWidget {
             ExcludeSemantics(
               child: Row(
                 children: [
-                  for (var i = 0; i < done; i++) ...[
+                  // «أدوار منجزة» — الأبعد عن الحالي أولًا، فتُضغط الزيادة في
+                  // شريحة واحدة بدل نقاط لا تُرى بعرض 360px (ق39).
+                  if (seg.doneCompressed) ...[
+                    Expanded(flex: 20, child: _dot(c.primary)),
+                    const SizedBox(width: 6),
+                  ],
+                  for (var i = 0; i < seg.doneDots; i++) ...[
                     Expanded(flex: 10, child: _dot(c.primary)),
                     const SizedBox(width: 6),
                   ],
-                  for (var i = 0; i < ahead; i++) ...[
+                  for (var i = 0; i < seg.aheadDots; i++) ...[
                     Expanded(flex: 10, child: _dot(c.line)),
+                    const SizedBox(width: 6),
+                  ],
+                  // «ما زال ينتظر» — الأبعد عن الحالي يُضغط، فالنقاط الفردية
+                  // الأقرب لدور الزبون تبقى الأوضح.
+                  if (seg.aheadCompressed) ...[
+                    Expanded(flex: 20, child: _dot(c.line)),
                     const SizedBox(width: 6),
                   ],
                   Expanded(

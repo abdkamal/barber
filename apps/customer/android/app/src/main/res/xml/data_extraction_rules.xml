@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  L7 / design.md §7: لا نسخ احتياطي سحابي ولا نقل بين الأجهزة لبيانات هذا
+  التطبيق (طابور محلي مشفّر بـSQLCipher، رموز الجلسة...). android:allowBackup
+  في AndroidManifest.xml يمنع أندرويد 12+ من استخدام هذا الملف أصلًا، لكنه
+  يبقى هنا دفاعًا في العمق ولوضوح النية.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+    </device-transfer>
+</data-extraction-rules>

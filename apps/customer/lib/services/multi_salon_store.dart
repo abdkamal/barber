@@ -44,14 +44,40 @@ class MultiSalonStore {
   }
 
   /// يحفظ/يحدّث جلسة صالون واحد. إذا كان `rememberMe == false` لا يُخزَّن على
-  /// القرص، فقط في الذاكرة لهذه الجلسة (ق17).
+  /// القرص، فقط في الذاكرة لهذه الجلسة (ق17) — **ولا تبقى** أي جلسة أقدم كانت
+  /// مخزَّنة على القرص لهذا الصالون (مثلًا لو فعّل «الدخول تلقائيًا» سابقًا)،
+  /// فتُحذف من القرص صراحة (L7) حتى لا يُعاد استخدام رمز تجديد قديم بعد إغلاق
+  /// التطبيق رغم اختيار الزبون الصريح بعدم التذكّر هذه المرة.
   Future<void> upsert(SalonSession salonSession, {required bool rememberMe}) async {
     await loadAll();
     _cache!.removeWhere((e) => e.code == salonSession.code);
     _cache!.add(salonSession);
     if (rememberMe) {
       await _persist();
+    } else {
+      await _persistWithoutOnDisk(salonSession.code);
     }
+  }
+
+  /// يقرأ نسخة القرص الحالية (بمعزل عن ذاكرة هذه الجلسة) ويحذف منها [code]
+  /// ثم يكتبها — دون أن يمسّ ذاكرة الجلسة الحالية (`_cache`)، التي تبقى
+  /// حاملة الجلسة الجديدة غير المخزَّنة طوال هذا التشغيل فقط.
+  Future<void> _persistWithoutOnDisk(String code) async {
+    final onDisk = <SalonSession>[];
+    final raw = await _storage.read(key: _salonsKey);
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final list = jsonDecode(raw) as List<dynamic>;
+        onDisk.addAll(list.map((e) => SalonSession.fromJson(e as Map<String, dynamic>)));
+      } catch (_) {
+        // قرص تالف: لا شيء نحذفه منه؛ الكتابة أدناه تُصفّره بأمان.
+      }
+    }
+    onDisk.removeWhere((e) => e.code == code);
+    await _storage.write(
+      key: _salonsKey,
+      value: jsonEncode(onDisk.map((e) => e.toJson()).toList()),
+    );
   }
 
   Future<void> remove(String code) async {

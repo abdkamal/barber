@@ -17,11 +17,16 @@ class BookScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.currency,
+    required this.timezone,
     required this.onBooked,
   });
 
   final CustomerApi api;
   final String currency;
+
+  /// المنطقة الزمنية للصالون (design.md §2) — يُثبَّت بها الوقت المطلوب ويُعرض
+  /// بها (لا بتوقيت الجهاز؛ I5).
+  final String timezone;
   final ValueChanged<core.Booking> onBooked;
 
   @override
@@ -81,10 +86,22 @@ class _BookScreenState extends State<BookScreen> {
     }
   }
 
+  /// يثبّت الساعة المطلوبة على يوم عمل الحلاق المختار (`workStart`/`workEnd`
+  /// من `/customer/today`) بتوقيت الصالون، مع الالتفاف لليوم التالي إن كانت
+  /// الساعة قبل بدء دوام يعبر منتصف الليل (ق30، I5). بلا حلاق محدد («الأسرع»)
+  /// يُستخدم تاريخ اليوم بتوقيت الصالون.
   DateTime? get _requestedAtUtc {
     if (_kind != core.BookingKind.requested || _requestedTime == null) return null;
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day, _requestedTime!.hour, _requestedTime!.minute).toUtc();
+    final barber = _selectedBarberId == null
+        ? null
+        : _barbers.where((b) => b.id == _selectedBarberId).firstOrNull;
+    return core.anchorRequestedTimeUtc(
+      hour: _requestedTime!.hour,
+      minute: _requestedTime!.minute,
+      timezoneName: widget.timezone,
+      workStartUtc: barber?.workStart,
+      workEndUtc: barber?.workEnd,
+    );
   }
 
   void _onSelectionChanged() {
@@ -242,8 +259,8 @@ class _BookScreenState extends State<BookScreen> {
           ui.OfferCard(
             requested: _requestedTime == null
                 ? ''
-                : '${formatHourMinute(_requestedAtUtc!)} ${formatAmPm(_requestedAtUtc!)}',
-            offered: '${formatHourMinute(quote.start)} ${formatAmPm(quote.start)}',
+                : '${formatHourMinute(_requestedAtUtc!, widget.timezone)} ${formatAmPm(_requestedAtUtc!, widget.timezone)}',
+            offered: '${formatHourMinute(quote.start, widget.timezone)} ${formatAmPm(quote.start, widget.timezone)}',
             barber: _barberName(quote.barberId),
             secondsLeft: _secondsLeft,
             onAccept: _submitting ? null : _acceptOffer,
@@ -320,7 +337,7 @@ class _BookScreenState extends State<BookScreen> {
                         : b.workStart == null
                             ? 'ليس في دوامه اليوم'
                             : (b.dayState == core.BarberDayState.disconnected ? 'غير متصل' : null),
-                    nextAt: b.nextAvailableStart == null ? null : formatHourMinute(b.nextAvailableStart!),
+                    nextAt: b.nextAvailableStart == null ? null : formatHourMinute(b.nextAvailableStart!, widget.timezone),
                     wait: b.nextAvailableStart == null
                         ? null
                         : 'بعد ${b.nextAvailableStart!.difference(DateTime.now().toUtc()).inMinutes.clamp(0, 999)} د',
@@ -380,7 +397,7 @@ class _BookScreenState extends State<BookScreen> {
                     children: [
                       const Text('الوقت المتوقع'),
                       Text(
-                        '${formatHourMinute(_quote!.start)} ${formatAmPm(_quote!.start)}',
+                        '${formatHourMinute(_quote!.start, widget.timezone)} ${formatAmPm(_quote!.start, widget.timezone)}',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ],

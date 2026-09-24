@@ -6,3 +6,4 @@ library;
 export 'src/api_client.dart';
 export 'src/models/models.dart';
 export 'src/token_store.dart';
+export 'src/tz_util.dart';

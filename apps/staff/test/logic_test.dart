@@ -71,6 +71,53 @@ void main() {
     expect(r.last.eta, now);
   });
 
+  test('recomputeEtas: الخدمة لا تتقاطع مع استراحة (تُدفع لما بعدها كاملة)', () {
+    // استراحة 10:15–10:30؛ خدمة 30 د تبدأ 10:00 تصطدم بها فتُدفع لـ10:30.
+    final q = [_e('a', sa.BookingStatus.waiting, 1)];
+    final r = recomputeEtas(
+      q,
+      now,
+      breaks: [
+        sa.BreakPeriod(
+          id: 'br-1',
+          kind: sa.BreakKind.prayer,
+          start: now.add(const Duration(minutes: 15)),
+          end: now.add(const Duration(minutes: 30)),
+        ),
+      ],
+    );
+    expect(r.single.eta, now.add(const Duration(minutes: 30)));
+  });
+
+  test('recomputeEtas: فترة «حاضرون فقط» (ق33) تحجب حجز التطبيق لا الحاضر', () {
+    final window = [
+      sa.TimeWindow(id: 'w-1', start: now, end: now.add(const Duration(minutes: 30))),
+    ];
+    // حجز تطبيق يبدأ في نافذة «حاضرون فقط» — يُدفع لنهايتها.
+    final appBooking = _e('app', sa.BookingStatus.waiting, 1);
+    final appResult = recomputeEtas([appBooking], now, walkInOnly: window);
+    expect(appResult.single.eta, now.add(const Duration(minutes: 30)));
+
+    // حجز حاضر (walkIn) لا يتأثر بنفس النافذة.
+    final walkInEntry = QueueEntry(
+      id: 'walk',
+      customerId: 'c',
+      barberId: 'b',
+      name: 'حاضر',
+      status: sa.BookingStatus.waiting,
+      serviceIds: const ['s'],
+      kind: sa.BookingKind.queue,
+      originalEta: now,
+      eta: now,
+      durationMin: 30,
+      priceCents: 4000,
+      position: 1,
+      walkIn: true,
+    );
+    final walkInResult = recomputeEtas([walkInEntry], now, walkInOnly: window);
+    expect(walkInResult.single.eta, now, reason: 'الحاضر يبدأ فورًا رغم فترة «حاضرون فقط»');
+  });
+
   test('قاعدة ق3: العمل المعروف المتبقي', () {
     final q = [
       _e('a', sa.BookingStatus.inService, 0, start: now.subtract(const Duration(minutes: 10))),

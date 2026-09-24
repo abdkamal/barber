@@ -27,7 +27,7 @@ void main() {
       final api = FakeCustomerApi();
       await pumpSaloniApp(
         tester,
-        BookScreen(api: api, currency: 'ر.س', onBooked: (_) {}),
+        BookScreen(api: api, currency: 'ر.س', timezone: 'Asia/Riyadh', onBooked: (_) {}),
         textScale: 1.3,
         surfaceSize: const Size(360, 800),
       );
@@ -61,7 +61,7 @@ void main() {
 
     await pumpSaloniApp(
       tester,
-      TrackScreen(api: api, onChangeTime: (_) {}, onCancel: (_) {}),
+      TrackScreen(api: api, timezone: 'Asia/Riyadh', onChangeTime: (_) {}, onCancel: (_) {}),
       textScale: 1.3,
       surfaceSize: const Size(360, 800),
     );

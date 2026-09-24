@@ -218,6 +218,27 @@ void main() {
     expect(find.byType(QueueProgress), findsOneWidget);
   });
 
+  testWidgets('QueueProgress — طابور طويل جدًا (ahead=30) لا يفيض بعرض 360', (tester) async {
+    await tester.pumpWidget(
+      _harness(const QueueProgress(done: 12, ahead: 30), width: 360),
+    );
+    _expectNoOverflow(tester);
+    expect(find.byType(QueueProgress), findsOneWidget);
+  });
+
+  test('QueueProgress.segments — يضغط الزيادة في شريحة واحدة (لا نقاط بلا حد)', () {
+    // ضمن الحد: بلا ضغط.
+    final small = QueueProgress.segments(done: 3, ahead: 2);
+    expect(small, (doneDots: 3, doneCompressed: false, aheadDots: 2, aheadCompressed: false));
+
+    // تجاوز الحد: أقصى 4 منجزة + 6 متبقية، والباقي شريحة واحدة لكل جهة.
+    final big = QueueProgress.segments(done: 12, ahead: 30);
+    expect(big.doneCompressed, isTrue);
+    expect(big.doneDots, QueueProgress.maxDoneDots - 1);
+    expect(big.aheadCompressed, isTrue);
+    expect(big.aheadDots, QueueProgress.maxAheadDots - 1);
+  });
+
   testWidgets('QueueItem — بعرض 360 مع شارات متعددة', (tester) async {
     await tester.pumpWidget(
       _harness(

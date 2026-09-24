@@ -66,6 +66,7 @@ class Booking {
     this.lastChangeReason,
     this.serveLate = false,
     this.needsReview = false,
+    this.canPostpone,
   });
 
   final String id;
@@ -137,6 +138,12 @@ class Booking {
   /// يحتاج مراجعة المدير (تعارض مزامنة).
   final bool needsReview;
 
+  /// هل يُسمح بتأجيل هذا الحجز رغم استخدام التأجيل مرة (ق23 — تقديم مفاجئ
+  /// يُعفي الزبون). حقل اختياري لم يثبَّت بعد في `docs/api.md`؛ إن غاب من
+  /// السيرفر (`null`) يُترك القرار للسيرفر (لا حظر محلي صارم) — التطبيق لا
+  /// يفترض شيئًا في غيابه.
+  final bool? canPostpone;
+
   /// المدة للعرض: المقدّرة، وإلا مجموع المدد الأساسية.
   int? get durationMin =>
       estimatedDurationMin ??
@@ -182,6 +189,7 @@ class Booking {
         lastChangeReason: json['lastChangeReason'] as String?,
         serveLate: json['serveLate'] as bool? ?? false,
         needsReview: json['needsReview'] as bool? ?? false,
+        canPostpone: json['canPostpone'] as bool?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -214,5 +222,6 @@ class Booking {
         'lastChangeReason': lastChangeReason,
         'serveLate': serveLate,
         'needsReview': needsReview,
+        if (canPostpone != null) 'canPostpone': canPostpone,
       };
 }

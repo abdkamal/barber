@@ -63,6 +63,7 @@ class QueueEntry {
     required this.durationMin,
     required this.priceCents,
     this.postponementUsed = false,
+    this.canPostpone,
     this.actualStart,
     this.actualEnd,
     this.calledAt,
@@ -91,6 +92,10 @@ class QueueEntry {
   final int durationMin;
   final int priceCents;
   final bool postponementUsed;
+
+  /// ق23: إعفاء صريح من السيرفر يسمح بتأجيل جديد رغم استخدامه — `null` إن
+  /// لم يرسله السيرفر بعد، فيُترك القرار له (لا حظر محلي صارم).
+  final bool? canPostpone;
   final DateTime? actualStart;
   final DateTime? actualEnd;
   final DateTime? calledAt;
@@ -118,6 +123,7 @@ class QueueEntry {
     int? durationMin,
     int? priceCents,
     bool? postponementUsed,
+    bool? canPostpone,
     DateTime? actualStart,
     DateTime? actualEnd,
     DateTime? calledAt,
@@ -141,6 +147,7 @@ class QueueEntry {
         durationMin: durationMin ?? this.durationMin,
         priceCents: priceCents ?? this.priceCents,
         postponementUsed: postponementUsed ?? this.postponementUsed,
+        canPostpone: canPostpone ?? this.canPostpone,
         actualStart: actualStart ?? this.actualStart,
         actualEnd: actualEnd ?? this.actualEnd,
         calledAt: calledAt ?? this.calledAt,
@@ -182,6 +189,7 @@ class QueueEntry {
           (durFromServices > 0 ? durFromServices : (b.durationMin ?? 30)),
       priceCents: b.priceCents ?? _int(r['priceCents']) ?? priceFromServices,
       postponementUsed: b.postponementUsed,
+      canPostpone: b.canPostpone,
       actualStart: b.actualStart,
       actualEnd: b.actualEnd,
       calledAt: b.calledAt ?? _date(r['calledAt']),
@@ -206,6 +214,7 @@ class QueueEntry {
         queuePosition: position,
         originalEta: originalEta,
         postponementUsed: postponementUsed,
+        canPostpone: canPostpone,
         actualStart: actualStart,
         actualEnd: actualEnd,
         source: source,
@@ -278,6 +287,46 @@ sa.PaymentStatus? _payment(String v) {
     return sa.PaymentStatus.fromWire(v);
   } catch (_) {
     return null;
+  }
+}
+
+/// حدث رفضه السيرفر عند المزامنة (انتقال غير صالح — design.md §6.2) — يُعرض
+/// للحلاق برسالة واضحة تسمّي الزبون ونوع الإجراء والسبب، بدل أن يختفي بصمت.
+class RejectedEvent {
+  const RejectedEvent({
+    required this.eventId,
+    this.type,
+    this.bookingId,
+    this.customerName,
+    this.reason,
+  });
+
+  final String eventId;
+  final sa.DeviceEventType? type;
+  final String? bookingId;
+  final String? customerName;
+  final String? reason;
+
+  static const _actionNames = {
+    sa.DeviceEventType.serviceStarted: 'بدء الخدمة',
+    sa.DeviceEventType.serviceFinished: 'إنهاء الخدمة',
+    sa.DeviceEventType.servicesChanged: 'تغيير الخدمة',
+    sa.DeviceEventType.paymentConfirmed: 'تأكيد الدفع',
+    sa.DeviceEventType.postponed: 'التأجيل',
+    sa.DeviceEventType.waited: 'الانتظار',
+    sa.DeviceEventType.noShow: '«لم يحضر»',
+    sa.DeviceEventType.closingDecision: 'قرار تجاوز الإغلاق',
+    sa.DeviceEventType.breakStarted: 'بدء الاستراحة',
+    sa.DeviceEventType.breakEnded: 'إنهاء الاستراحة',
+    sa.DeviceEventType.absentToday: '«لن أعمل اليوم»',
+  };
+
+  /// رسالة عربية واضحة تُعرض للحلاق: ماذا رُفض ولماذا.
+  String get arabicMessage {
+    final action = _actionNames[type] ?? 'إجراء';
+    final who = customerName == null ? '' : ' لـ$customerName';
+    final why = (reason == null || reason!.isEmpty) ? '' : ' — السبب: $reason';
+    return 'رفض السيرفر $action$who$why. راجع حالة الحجز الحالية.';
   }
 }
 

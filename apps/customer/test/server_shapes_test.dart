@@ -66,7 +66,7 @@ CurrentBooking currentJson() {
 void main() {
   testWidgets('المتابعة تعرض اسم الحلاق والخدمات من السيرفر', (tester) async {
     final api = FakeCustomerApi()..setCurrentBooking(currentJson());
-    await pumpSaloniApp(tester, TrackScreen(api: api, onChangeTime: (_) {}, onCancel: (_) {}));
+    await pumpSaloniApp(tester, TrackScreen(api: api, timezone: 'Asia/Riyadh', onChangeTime: (_) {}, onCancel: (_) {}));
     await tester.pumpAndSettle();
     expect(find.textContaining('خالد الحربي'), findsWidgets);
     expect(find.textContaining('حلاقة شعر'), findsWidgets);
@@ -77,7 +77,7 @@ void main() {
     var noActive = 0;
     await pumpSaloniApp(
       tester,
-      TrackScreen(api: api, onChangeTime: (_) {}, onCancel: (_) {}, onNoActiveBooking: () => noActive++),
+      TrackScreen(api: api, timezone: 'Asia/Riyadh', onChangeTime: (_) {}, onCancel: (_) {}, onNoActiveBooking: () => noActive++),
     );
     await tester.pumpAndSettle();
     expect(noActive, 1);
@@ -108,7 +108,7 @@ void main() {
     Booking? changed;
     await pumpSaloniApp(
       tester,
-      ChangeTimeScreen(api: api, current: currentJson(), onChanged: (b) => changed = b),
+      ChangeTimeScreen(api: api, current: currentJson(), timezone: 'Asia/Riyadh', onChanged: (b) => changed = b),
     );
     await tester.pump();
     await tester.tap(find.text('تأكيد التعديل'));
@@ -132,7 +132,7 @@ void main() {
         'payment': {'status': 'confirmed', 'amountCents': 4000},
       }),
     ]);
-    await pumpSaloniApp(tester, HistoryScreen(api: api, currency: 'ر.س'));
+    await pumpSaloniApp(tester, HistoryScreen(api: api, currency: 'ر.س', timezone: 'Asia/Riyadh'));
     await tester.pumpAndSettle();
     expect(find.text('خالد الحربي'), findsOneWidget);
     expect(find.text('حلاقة شعر'), findsOneWidget);

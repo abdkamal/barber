@@ -41,6 +41,7 @@ void main() {
       tester,
       TrackScreen(
         api: api,
+        timezone: 'Asia/Riyadh',
         onChangeTime: (_) {},
         onCancel: (_) {},
       ),
@@ -73,7 +74,7 @@ void main() {
 
     await pumpSaloniApp(
       tester,
-      TrackScreen(api: api, onChangeTime: (_) {}, onCancel: (_) {}),
+      TrackScreen(api: api, timezone: 'Asia/Riyadh', onChangeTime: (_) {}, onCancel: (_) {}),
     );
     await tester.pumpAndSettle();
 
@@ -98,7 +99,7 @@ void main() {
 
     await pumpSaloniApp(
       tester,
-      TrackScreen(api: api, onChangeTime: (_) {}, onCancel: (_) {}),
+      TrackScreen(api: api, timezone: 'Asia/Riyadh', onChangeTime: (_) {}, onCancel: (_) {}),
     );
     await tester.pumpAndSettle();
 

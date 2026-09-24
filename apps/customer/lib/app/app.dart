@@ -96,6 +96,7 @@ class _RootSwitcherState extends ConsumerState<_RootSwitcher> {
           api: session.api!,
           salonCode: session.activeCode!,
           salonName: session.activeName ?? session.activeCode!,
+          timezone: session.activeTimezone ?? 'Asia/Riyadh',
           currency: 'ر.س',
           savedSalons: session.savedSalons,
           isDark: Theme.of(context).brightness == Brightness.dark,

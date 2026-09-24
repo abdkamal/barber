@@ -1,22 +1,20 @@
 /// أدوات تنسيق الوقت والنصوص العربية المشتركة بين الشاشات.
 ///
-/// **ملاحظة صدق:** يُعرض الوقت بتوقيت الجهاز المحلي (`DateTime.toLocal()`)
-/// لا بتوقيت الصالون (`salon.timezone` من `docs/api.md`) — تحويل منطقة زمنية
-/// حقيقي يحتاج حزمة `timezone` غير المتوفرة هنا. مقبول عمليًا لأن الزبون
-/// يستخدم هاتفه من داخل نفس مدينة الصالون، لكنه افتراض يجب تأكيده لاحقًا.
+/// **الأوقات تُعرض بتوقيت الصالون** (`salon.timezone` من `docs/api.md`) لا
+/// بتوقيت الجهاز (design.md §2، §10؛ I5) — عبر حزمة `timezone` في
+/// `saloni_api` (`core.salonHourMinute`/`core.salonAmPm`). كل الدوال هنا
+/// تأخذ `timezone` وتمرره لتلك الدوال.
 library;
 
-String formatHourMinute(DateTime utc) {
-  final local = utc.toLocal();
-  var h = local.hour % 12;
-  if (h == 0) h = 12;
-  final m = local.minute.toString().padLeft(2, '0');
-  return '$h:$m';
-}
+import 'package:saloni_api/saloni_api.dart' as core;
 
-String formatAmPm(DateTime utc) => utc.toLocal().hour < 12 ? 'ص' : 'م';
+String formatHourMinute(DateTime utc, String timezone) =>
+    core.salonHourMinute(utc, timezone);
 
-/// «آخر تحديث: قبل {المدة}» — design.md §8، يُعرض دائمًا.
+String formatAmPm(DateTime utc, String timezone) => core.salonAmPm(utc, timezone);
+
+/// «آخر تحديث: قبل {المدة}» — design.md §8، يُعرض دائمًا. مدة نسبية فلا
+/// تتأثر بالمنطقة الزمنية.
 String formatAgo(DateTime since, {DateTime? now}) {
   final n = now ?? DateTime.now().toUtc();
   final d = n.difference(since);
@@ -54,8 +52,8 @@ String formatClockFromMinutes(int minutesSinceMidnight) {
   return '$h12:$m $ampm';
 }
 
-/// تاريخ زيارة مختصر بتوقيت الجهاز: «الخميس 24/9».
-String formatVisitDate(DateTime utc) {
-  final d = utc.toLocal();
+/// تاريخ زيارة مختصر بتوقيت الصالون: «الخميس 24/9».
+String formatVisitDate(DateTime utc, String timezone) {
+  final d = core.toSalonTime(utc, timezone);
   return '${weekdayNameArabic(d.weekday)} ${d.day}/${d.month}';
 }

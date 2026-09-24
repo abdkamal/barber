@@ -27,6 +27,9 @@ class FakeCustomerApi implements CustomerApi {
   /// نتيجة `getQuote` القادمة — يضبطها الاختبار قبل الاستدعاء.
   Quote? nextQuote;
 
+  /// آخر `requestedAt` مُرسل إلى `getQuote` — للتحقق من تثبيت الساعة (I5).
+  DateTime? lastQuoteRequestedAt;
+
   /// استثناء يُرمى بدل نتيجة عادية — لمحاكاة الأخطاء.
   Object? nextQuoteError;
   Object? nextCurrentBookingError;
@@ -87,6 +90,7 @@ class FakeCustomerApi implements CustomerApi {
     required BookingKind kind,
     DateTime? requestedAt,
   }) async {
+    lastQuoteRequestedAt = requestedAt;
     if (nextQuoteError != null) throw nextQuoteError!;
     return nextQuote!;
   }

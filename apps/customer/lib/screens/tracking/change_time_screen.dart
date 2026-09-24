@@ -17,11 +17,16 @@ class ChangeTimeScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.current,
+    required this.timezone,
     required this.onChanged,
   });
 
   final CustomerApi api;
   final core.CurrentBooking current;
+
+  /// المنطقة الزمنية للصالون (design.md §2) — يُثبَّت بها الوقت المطلوب ويُعرض
+  /// بها (لا بتوقيت الجهاز؛ I5).
+  final String timezone;
   final ValueChanged<core.Booking> onChanged;
 
   @override
@@ -36,6 +41,29 @@ class _ChangeTimeScreenState extends State<ChangeTimeScreen> {
   core.Quote? _offer;
   int _secondsLeft = 0;
   Timer? _countdown;
+
+  /// دوام الحلاق الحالي (`workStart`/`workEnd`) لتثبيت الساعة المطلوبة على
+  /// يومه (ق30، I5) — يُجلب مرة عند فتح الشاشة؛ بلا معرفة الدوام يُستخدم
+  /// تاريخ اليوم بتوقيت الصالون (تقريب معقول لحجوزات اليوم نفسه فقط، §5.11).
+  core.Barber? _barberShift;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBarberShift();
+  }
+
+  Future<void> _loadBarberShift() async {
+    final barberId = widget.current.barber?.id;
+    if (barberId == null) return;
+    try {
+      final today = await widget.api.getCustomerToday();
+      final match = today.barbers.where((b) => b.id == barberId).firstOrNull;
+      if (mounted && match != null) setState(() => _barberShift = match);
+    } catch (_) {
+      // بلا دوام معروف: التثبيت يعود لتاريخ اليوم بتوقيت الصالون.
+    }
+  }
 
   @override
   void dispose() {
@@ -100,14 +128,13 @@ class _ChangeTimeScreenState extends State<ChangeTimeScreen> {
 
   DateTime? get _requestedAtUtc {
     if (_kind != core.BookingKind.requested || _time == null) return null;
-    final now = DateTime.now();
-    return DateTime(
-      now.year,
-      now.month,
-      now.day,
-      _time!.hour,
-      _time!.minute,
-    ).toUtc();
+    return core.anchorRequestedTimeUtc(
+      hour: _time!.hour,
+      minute: _time!.minute,
+      timezoneName: widget.timezone,
+      workStartUtc: _barberShift?.workStart,
+      workEndUtc: _barberShift?.workEnd,
+    );
   }
 
   Future<void> _pickTime() async {
@@ -159,7 +186,8 @@ class _ChangeTimeScreenState extends State<ChangeTimeScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'موعدك الحالي: ${formatHourMinute(widget.current.eta)} ${formatAmPm(widget.current.eta)}',
+                'موعدك الحالي: ${formatHourMinute(widget.current.eta, widget.timezone)} '
+                '${formatAmPm(widget.current.eta, widget.timezone)}',
               ),
               const SizedBox(height: 16),
               ui.SaloniSegmentedControl(
@@ -203,9 +231,11 @@ class _ChangeTimeScreenState extends State<ChangeTimeScreen> {
                 ui.OfferCard(
                   requested: _requestedAtUtc == null
                       ? ''
-                      : '${formatHourMinute(_requestedAtUtc!)} ${formatAmPm(_requestedAtUtc!)}',
+                      : '${formatHourMinute(_requestedAtUtc!, widget.timezone)} '
+                          '${formatAmPm(_requestedAtUtc!, widget.timezone)}',
                   offered:
-                      '${formatHourMinute(_offer!.start)} ${formatAmPm(_offer!.start)}',
+                      '${formatHourMinute(_offer!.start, widget.timezone)} '
+                      '${formatAmPm(_offer!.start, widget.timezone)}',
                   barber:
                       _offer!.barberName ??
                       widget.current.barber?.name ??

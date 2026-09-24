@@ -22,6 +22,7 @@ void main() {
                 bookingId: 'bk-1',
                 barberName: 'خالد الحربي',
                 eta: DateTime.now().toUtc().add(const Duration(minutes: 25)),
+                timezone: 'Asia/Riyadh',
                 onCancelled: () => cancelledCallback = true,
               ),
               child: const Text('فتح شاشة الإلغاء'),

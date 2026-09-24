@@ -1,4 +1,5 @@
 import 'package:customer/screens/booking/book_screen.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:saloni_api/saloni_api.dart';
 
@@ -21,7 +22,7 @@ void main() {
     Booking? booked;
     await pumpSaloniApp(
       tester,
-      BookScreen(api: api, currency: 'ر.س', onBooked: (b) => booked = b),
+      BookScreen(api: api, currency: 'ر.س', timezone: 'Asia/Riyadh', onBooked: (b) => booked = b),
     );
     await tester.pumpAndSettle();
 
@@ -67,7 +68,7 @@ void main() {
     Booking? booked;
     await pumpSaloniApp(
       tester,
-      BookScreen(api: api, currency: 'ر.س', onBooked: (b) => booked = b),
+      BookScreen(api: api, currency: 'ر.س', timezone: 'Asia/Riyadh', onBooked: (b) => booked = b),
     );
     await tester.pumpAndSettle();
 
@@ -88,4 +89,72 @@ void main() {
     expect(booked!.id, 'bk-offer-1');
     expect(api.createdBookingCalls.last['offerId'], 'offer-1');
   });
+
+  testWidgets(
+    'I5: طلب 00:30 عند دوام يعبر منتصف الليل (18:00–02:00) يُثبَّت على اليوم التالي بتوقيت الصالون',
+    (tester) async {
+      // دوام الحلاق: 18:00 اليوم — 02:00 غدًا بتوقيت الرياض.
+      final workStart = DateTime.utc(2026, 9, 24, 15, 0); // 18:00 الرياض
+      final workEnd = DateTime.utc(2026, 9, 25, 23, 0); // 02:00 الرياض غدًا
+      final today = defaultTodayJson();
+      (today['barbers'] as List)[0] = {
+        'id': 'b-1',
+        'name': 'خالد الحربي',
+        'photoUrl': null,
+        'dayState': 'connected',
+        'nextAvailableStart': workStart.toIso8601String(),
+        'queueLength': 2,
+        'accepting': true,
+        'workStart': workStart.toIso8601String(),
+        'workEnd': workEnd.toIso8601String(),
+      };
+      final api = FakeCustomerApi(today: today);
+      api.nextQuote = Quote(
+        barberId: 'b-1',
+        start: DateTime.utc(2026, 9, 24, 21, 30),
+        end: DateTime.utc(2026, 9, 24, 22, 0),
+        durationMin: 30,
+        priceCents: 4000,
+        outcome: QuoteOutcome.accept,
+      );
+
+      await pumpSaloniApp(
+        tester,
+        BookScreen(api: api, currency: 'ر.س', timezone: 'Asia/Riyadh', onBooked: (_) {}),
+        surfaceSize: const Size(390, 1600),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('خالد الحربي'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ساعة محددة'));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('اختر الساعة المطلوبة'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('اختر الساعة المطلوبة'));
+      await tester.pumpAndSettle();
+
+      // يبدّل مربع الحوار لإدخال نصي (ساعة/دقيقة) بدل القرص — أسهل للاختبار.
+      final keyboardToggle = find.byIcon(Icons.keyboard_outlined);
+      if (keyboardToggle.evaluate().isNotEmpty) {
+        await tester.tap(keyboardToggle);
+        await tester.pumpAndSettle();
+      }
+      final fields = find.byType(TextField);
+      await tester.enterText(fields.at(0), '12');
+      await tester.enterText(fields.at(1), '30');
+      // منتصف الليل بنمط 12 ساعة يحتاج تحديد «ص» صراحة.
+      final amButton = find.text('AM');
+      if (amButton.evaluate().isNotEmpty) await tester.tap(amButton.first);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.textContaining('حلاقة شعر').first);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      expect(api.lastQuoteRequestedAt, DateTime.utc(2026, 9, 24, 21, 30));
+    },
+  );
 }

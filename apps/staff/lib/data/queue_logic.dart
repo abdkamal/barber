@@ -31,8 +31,53 @@ QueueEntry? currentInService(List<QueueEntry> all) {
   return null;
 }
 
-/// يعيد حساب الأوقات المتوقعة محليًا بعد إجراء (تقديري حتى تصل أوقات السيرفر).
-List<QueueEntry> recomputeEtas(List<QueueEntry> all, DateTime now) {
+/// نافذة تمنع الجدولة فيها: استراحة حقيقية، أو فترة «حاضرون فقط» (ق33) التي
+/// تمنع حجوزات التطبيق فقط وتبقى مفتوحة للحاضرين — تطابق `blockingBreaks`/
+/// `fitAroundBreaks` في محرك السيرفر (`packages/engine/src/timeline.ts`).
+class _BlockWindow {
+  const _BlockWindow(this.start, this.end, {this.walkInOnly = false});
+  final DateTime start;
+  final DateTime end;
+  final bool walkInOnly;
+}
+
+List<_BlockWindow> _windows(List<sa.BreakPeriod> breaks, List<sa.TimeWindow> walkInOnly) => [
+      for (final b in breaks) _BlockWindow(b.start, b.end),
+      for (final w in walkInOnly) _BlockWindow(w.start, w.end, walkInOnly: true),
+    ];
+
+/// النوافذ التي تحجز على هذا الحجز: الحاضر يتجاوز فترات «حاضرون فقط» (ق33).
+List<_BlockWindow> _blocking(List<_BlockWindow> windows, bool isWalkIn) =>
+    isWalkIn ? windows.where((w) => !w.walkInOnly).toList() : windows;
+
+/// أبكر بدء ≥ `from` تتسع فيه خدمة بمدة [durationMin] كاملة خارج كل نافذة
+/// حاجبة — الخدمة لا تتقاطع أبدًا مع استراحة (design.md §5.1).
+DateTime _fitAroundBreaks(DateTime from, int durationMin, List<_BlockWindow> windows) {
+  var start = from;
+  var moved = true;
+  while (moved) {
+    moved = false;
+    for (final w in windows) {
+      final end = start.add(Duration(minutes: durationMin));
+      if (start.isBefore(w.end) && end.isAfter(w.start)) {
+        start = w.end;
+        moved = true;
+      }
+    }
+  }
+  return start;
+}
+
+/// يعيد حساب الأوقات المتوقعة محليًا بعد إجراء (تقديري حتى تصل أوقات
+/// السيرفر) — يحاكي محرك الجدولة (design.md §5.1): لا تتقاطع خدمة مع
+/// استراحة، وفترات «حاضرون فقط» (ق33) تحجب حجوزات التطبيق فقط.
+List<QueueEntry> recomputeEtas(
+  List<QueueEntry> all,
+  DateTime now, {
+  List<sa.BreakPeriod> breaks = const [],
+  List<sa.TimeWindow> walkInOnly = const [],
+}) {
+  final windows = _windows(breaks, walkInOnly);
   final ordered = activeOrdered(all);
   final updated = <String, QueueEntry>{};
   var t = now;
@@ -50,19 +95,23 @@ List<QueueEntry> recomputeEtas(List<QueueEntry> all, DateTime now) {
     if (e.requestedAt != null && e.requestedAt!.isAfter(start)) {
       start = e.requestedAt!;
     }
+    start = _fitAroundBreaks(start, e.durationMin, _blocking(windows, e.walkIn));
     updated[e.id] = e.copyWith(eta: start, position: pos++);
     t = start.add(Duration(minutes: e.durationMin));
   }
   return [for (final e in all) updated[e.id] ?? e];
 }
 
-/// يطبّق حدث جهاز على الطابور المحلي.
+/// يطبّق حدث جهاز على الطابور المحلي. [breaks]/[walkInOnly]: يوم الحلاق
+/// الحالي (design.md §5.1، ق33) لإعادة الحساب دون تقاطع الخدمات معها.
 List<QueueEntry> applyEvent(
   List<QueueEntry> all,
   sa.DeviceEvent event,
   List<sa.Service> services,
-  DateTime now,
-) {
+  DateTime now, {
+  List<sa.BreakPeriod> breaks = const [],
+  List<sa.TimeWindow> walkInOnly = const [],
+}) {
   final id = event.bookingId;
   QueueEntry? target;
   for (final e in all) {
@@ -70,6 +119,8 @@ List<QueueEntry> applyEvent(
   }
   List<QueueEntry> replace(QueueEntry updated) =>
       [for (final e in all) e.id == updated.id ? updated : e];
+  List<QueueEntry> recompute(List<QueueEntry> list) =>
+      recomputeEtas(list, now, breaks: breaks, walkInOnly: walkInOnly);
 
   switch (event.type) {
     case sa.DeviceEventType.serviceStarted:
@@ -84,7 +135,7 @@ List<QueueEntry> applyEvent(
           else
             e,
       ];
-      return recomputeEtas(list, now);
+      return recompute(list);
 
     case sa.DeviceEventType.serviceFinished:
       if (target == null) return all;
@@ -93,41 +144,38 @@ List<QueueEntry> applyEvent(
         actualEnd: event.occurredAt,
         payment: target.payment ?? sa.PaymentStatus.awaitingConfirmation,
       );
-      return recomputeEtas(replace(done), now);
+      return recompute(replace(done));
 
     case sa.DeviceEventType.servicesChanged:
       if (target == null) return all;
       final ids = (event.payload['serviceIds'] as List?)?.cast<String>() ?? target.serviceIds;
       final dur = sumDuration(ids, services);
       final price = sumPrice(ids, services);
-      return recomputeEtas(
+      return recompute(
         replace(target.copyWith(
           serviceIds: ids,
           durationMin: dur > 0 ? dur : target.durationMin,
           priceCents: price > 0 ? price : target.priceCents,
         )),
-        now,
       );
 
     case sa.DeviceEventType.postponed:
       if (target == null) return all;
       final steps = (event.payload['steps'] as num?)?.toInt() ?? 1;
-      return recomputeEtas(_postpone(all, target, steps), now);
+      return recompute(_postpone(all, target, steps));
 
     case sa.DeviceEventType.noShow:
       if (target == null) return all;
-      return recomputeEtas(
-          replace(target.copyWith(status: sa.BookingStatus.noShow)), now);
+      return recompute(replace(target.copyWith(status: sa.BookingStatus.noShow)));
 
     case sa.DeviceEventType.closingDecision:
       if (target == null) return all;
       final cancel = event.payload['decision'] == sa.ClosingDecision.cancel.toWire();
-      return recomputeEtas(
+      return recompute(
         replace(target.copyWith(
           status: cancel ? sa.BookingStatus.cancelled : null,
           closingDecided: true,
         )),
-        now,
       );
 
     case sa.DeviceEventType.paymentConfirmed:

@@ -45,6 +45,10 @@ class _LateSheetState extends State<LateSheet> {
     final e = widget.entry;
     final first = e.name.split(' ').first;
     final used = e.postponementUsed;
+    // ق23: إعفاء صريح من السيرفر (canPostpone == true) يتيح تأجيلًا جديدًا
+    // رغم استخدام التأجيل؛ عدم معرفة الحالة بعد (null) لا يمنع المحاولة —
+    // السيرفر يقرر ورفضه يظهر برسالة واضحة.
+    final canPostponeAgain = !used || e.canPostpone != false;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -67,12 +71,14 @@ class _LateSheetState extends State<LateSheet> {
         ]),
         const SizedBox(height: 14),
         Text(
-          used
-              ? 'استُخدم التأجيل لهذا الحجز. يمكنك انتظاره قليلًا أو تسجيله «لم يحضر».'
-              : 'القرار لك. التأجيل متاح مرة واحدة لهذا الحجز، ويُبلَّغ $first تلقائيًا ويُستدعى التالي.',
+          !used
+              ? 'القرار لك. التأجيل متاح مرة واحدة لهذا الحجز، ويُبلَّغ $first تلقائيًا ويُستدعى التالي.'
+              : canPostponeAgain
+                  ? 'استُخدم التأجيل، لكن السيرفر أعفى هذا الحجز (تقديم مفاجئ) — يمكنك تأجيله مجددًا.'
+                  : 'استُخدم التأجيل لهذا الحجز. يمكنك انتظاره قليلًا أو تسجيله «لم يحضر».',
           style: SaloniTextStyles.body.copyWith(color: c.inkMuted, fontSize: 14),
         ),
-        if (!used) ...[
+        if (canPostponeAgain) ...[
           const SizedBox(height: 14),
           SaloniSegmentedControl(
             label: 'عدد الأدوار',

@@ -15,10 +15,11 @@ import '../../widgets/status_mapper.dart';
 /// `priceCents`/`paymentStatus`) مع قيم احتياطية آمنة عند غيابها، ويجب
 /// تأكيدها مع فريق السيرفر.
 class HistoryScreen extends StatefulWidget {
-  const HistoryScreen({super.key, required this.api, required this.currency});
+  const HistoryScreen({super.key, required this.api, required this.currency, required this.timezone});
 
   final CustomerApi api;
   final String currency;
+  final String timezone;
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
@@ -66,7 +67,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
               padding: const EdgeInsets.all(16),
               itemCount: items.length,
               separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, i) => _HistoryTile(visit: items[i], currency: widget.currency),
+              itemBuilder: (context, i) =>
+                  _HistoryTile(visit: items[i], currency: widget.currency, timezone: widget.timezone),
             );
           },
         ),
@@ -76,10 +78,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
 }
 
 class _HistoryTile extends StatelessWidget {
-  const _HistoryTile({required this.visit, required this.currency});
+  const _HistoryTile({required this.visit, required this.currency, required this.timezone});
 
   final api.HistoryVisit visit;
   final String currency;
+  final String timezone;
 
   @override
   Widget build(BuildContext context) {
@@ -88,7 +91,7 @@ class _HistoryTile extends StatelessWidget {
     final services = b.services.map((s) => s.name).join('، ');
     final priceCents = visit.payment?.amountCents ?? b.priceCents ?? 0;
     final when = b.actualStart ?? b.eta ?? b.createdAt;
-    final dateStr = when == null ? (b.workDate ?? '') : formatVisitDate(when);
+    final dateStr = when == null ? (b.workDate ?? '') : formatVisitDate(when, timezone);
     // حالة الدفع لما اكتملت خدمته، وإلا حالة الزيارة نفسها (ملغى، لم يحضر…).
     final ui.BookingStatus tone = visit.payment != null
         ? mapPaymentStatus(visit.payment!.status)

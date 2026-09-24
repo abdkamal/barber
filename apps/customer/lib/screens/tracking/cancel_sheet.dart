@@ -11,6 +11,7 @@ Future<void> showCancelSheet({
   required String bookingId,
   required String barberName,
   required DateTime eta,
+  required String timezone,
   required VoidCallback onCancelled,
 }) {
   return showModalBottomSheet<void>(
@@ -22,6 +23,7 @@ Future<void> showCancelSheet({
       bookingId: bookingId,
       barberName: barberName,
       eta: eta,
+      timezone: timezone,
       onCancelled: onCancelled,
     ),
   );
@@ -34,6 +36,7 @@ class CancelSheet extends StatefulWidget {
     required this.bookingId,
     required this.barberName,
     required this.eta,
+    required this.timezone,
     required this.onCancelled,
   });
 
@@ -41,6 +44,7 @@ class CancelSheet extends StatefulWidget {
   final String bookingId;
   final String barberName;
   final DateTime eta;
+  final String timezone;
   final VoidCallback onCancelled;
 
   @override
@@ -83,7 +87,8 @@ class _CancelSheetState extends State<CancelSheet> {
             Text('إلغاء حجزك اليوم؟', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
             Text(
-              'حجزك عند ${widget.barberName} الساعة ${formatHourMinute(widget.eta)} ${formatAmPm(widget.eta)}. '
+              'حجزك عند ${widget.barberName} الساعة ${formatHourMinute(widget.eta, widget.timezone)} '
+              '${formatAmPm(widget.eta, widget.timezone)}. '
               'يمكنك الإلغاء في أي وقت قبل بدء خدمتك، ويمكنك الحجز من جديد لاحقًا.',
             ),
             if (_error != null) ...[

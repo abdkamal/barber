@@ -169,6 +169,19 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     if (repo.loadError != null) {
       children.add(SaloniBanner(tone: SaloniBannerTone.danger, body: repo.loadError));
     }
+    // إجراءات رفضها السيرفر عند المزامنة (انتقال غير صالح — design.md §6.2)؛
+    // تظهر للحلاق برسالة واضحة بدل أن تختفي بصمت، ويمكنه إغلاقها.
+    if (repo.lastRejectedEvents.isNotEmpty) {
+      children.add(SaloniBanner(
+        tone: SaloniBannerTone.warning,
+        title: 'رفض السيرفر بعض الإجراءات',
+        body: repo.lastRejectedEvents.map((e) => e.arabicMessage).join('\n'),
+        action: TextButton(
+          onPressed: repo.clearRejectedEvents,
+          child: const Text('إغلاق'),
+        ),
+      ));
+    }
     if (repo.noShiftToday && !repo.absentToday) {
       children.add(const SaloniBanner(
         tone: SaloniBannerTone.info,
@@ -345,7 +358,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               ? StatusBadge(
                   status: BookingStatus.payAwaiting,
                   small: true,
-                  label: '${digits('$awaiting')} بانتظار الدفع',
+                  label: '${digits('$awaiting')} بانتظار تأكيد الدفع',
                 )
               : null,
         ),

@@ -1,11 +1,18 @@
 /// تنسيق الأوقات والمبالغ والمدد بالعربية (design.md §10: اختيار نمط الأرقام).
 library;
 
+import 'package:saloni_api/saloni_api.dart' as sa;
+
 /// نمط الأرقام المعروض — يضبطه الإعداد «الأرقام العربية المشرقية».
 enum NumeralStyle { latin, eastern }
 
 /// الإعداد الحالي لنمط الأرقام (يُضبط من التفضيلات عند بدء التطبيق).
 NumeralStyle numeralStyle = NumeralStyle.latin;
+
+/// المنطقة الزمنية للصالون النشط — تُعرض بها كل الأوقات لا بتوقيت الجهاز
+/// (design.md §2، §10؛ I5). تُضبط عند الدخول/استرجاع الجلسة
+/// (`AuthController._adoptSession`/`bootstrap`/`refreshSessionInfo`).
+String salonTimezone = sa.defaultSalonTimezone;
 
 const _eastern = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
 
@@ -23,15 +30,15 @@ String digits(String s) {
   return b.toString();
 }
 
-/// «10:05» بالتوقيت المحلي للجهاز (بلا لاحقة).
+/// «10:05» بتوقيت الصالون (بلا لاحقة).
 String hhmm(DateTime t) {
-  final l = t.toLocal();
+  final l = sa.toSalonTime(t, salonTimezone);
   final h = l.hour % 12 == 0 ? 12 : l.hour % 12;
   return digits('$h:${l.minute.toString().padLeft(2, '0')}');
 }
 
-/// «ص» أو «م».
-String ampm(DateTime t) => t.toLocal().hour < 12 ? 'ص' : 'م';
+/// «ص» أو «م» بتوقيت الصالون.
+String ampm(DateTime t) => sa.toSalonTime(t, salonTimezone).hour < 12 ? 'ص' : 'م';
 
 /// «10:05 ص».
 String timeAr(DateTime t) => '${hhmm(t)} ${ampm(t)}';
@@ -59,7 +66,7 @@ const _weekdays = {
   DateTime.friday: 'الجمعة',
 };
 
-String weekdayAr(DateTime t) => _weekdays[t.toLocal().weekday]!;
+String weekdayAr(DateTime t) => _weekdays[sa.toSalonTime(t, salonTimezone).weekday]!;
 
 /// أيام الأسبوع بترتيب يبدأ بالسبت، مع رقم Dart لكل يوم.
 const List<(int, String)> weekdaysFromSaturday = [

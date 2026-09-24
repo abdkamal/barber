@@ -14,6 +14,7 @@ class TrackScreen extends StatefulWidget {
   const TrackScreen({
     super.key,
     required this.api,
+    required this.timezone,
     this.externalRefresh,
     required this.onChangeTime,
     required this.onCancel,
@@ -22,6 +23,7 @@ class TrackScreen extends StatefulWidget {
   });
 
   final CustomerApi api;
+  final String timezone;
 
   /// حدث خارجي (رسالة FCM) يطلب تحديثًا فوريًا بدل انتظار الاستطلاع الدوري.
   final Stream<void>? externalRefresh;
@@ -113,6 +115,7 @@ class _TrackScreenState extends State<TrackScreen> with WidgetsBindingObserver {
                     ? const Center(child: Text('لا يوجد حجز نشط حاليًا'))
                     : _Loaded(
                         current: _current!,
+                        timezone: widget.timezone,
                         onChangeTime: () => widget.onChangeTime(_current!),
                         onCancel: () => widget.onCancel(_current!),
                       ),
@@ -122,9 +125,15 @@ class _TrackScreenState extends State<TrackScreen> with WidgetsBindingObserver {
 }
 
 class _Loaded extends StatelessWidget {
-  const _Loaded({required this.current, required this.onChangeTime, required this.onCancel});
+  const _Loaded({
+    required this.current,
+    required this.timezone,
+    required this.onChangeTime,
+    required this.onCancel,
+  });
 
   final core.CurrentBooking current;
+  final String timezone;
   final VoidCallback onChangeTime;
   final VoidCallback onCancel;
 
@@ -166,14 +175,16 @@ class _Loaded extends StatelessWidget {
             ),
           ),
         ui.EtaCard(
-          eta: formatHourMinute(current.eta),
-          ampm: formatAmPm(current.eta),
+          eta: formatHourMinute(current.eta, timezone),
+          ampm: formatAmPm(current.eta, timezone),
           status: status,
           requested: booking.kind == core.BookingKind.requested,
           barber: current.barber?.name ?? 'حلاقك',
           services: booking.services.isEmpty ? '${booking.serviceIds.length} خدمة' : booking.serviceNames,
           updated: formatAgo(current.lastUpdateAt),
-          originalEta: changed ? '${formatHourMinute(current.originalEta)} ${formatAmPm(current.originalEta)}' : null,
+          originalEta: changed
+              ? '${formatHourMinute(current.originalEta, timezone)} ${formatAmPm(current.originalEta, timezone)}'
+              : null,
           reason: changed ? current.lastChangeReason : null,
           live: current.live,
           staleFor: current.live ? null : formatAgo(current.lastUpdateAt),
