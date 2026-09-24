@@ -1,4 +1,4 @@
-<!-- @dsCard group="Tracking" height=360 -->
+<!-- @dsCard group="Tracking" height=460 -->
 <!doctype html>
 <html lang="ar" dir="rtl">
 <head><meta charset="utf-8"><title>EtaCard</title></head>
@@ -6,7 +6,7 @@
 <div id="root"></div>
 <script>
   var S = window.Saloni, h = React.createElement;
-  ReactDOM.createRoot(document.getElementById('root')).render(h('div',{className:'pv'}, h(S.EtaCard,{eta:'10:40',ampm:'ص',status:'waiting',barber:'خالد الحربي',services:'شعر ولحية · 45 دقيقة',updated:'قبل دقيقة',originalEta:'10:20',reason:'تمديد خدمة سابقة'})));
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div',{className:'pv'}, h(S.EtaCard,{eta:'10:40',ampm:'ص',status:'waiting',barber:'خالد الحربي',services:'شعر ولحية · 45 دقيقة',updated:'قبل دقيقة',originalEta:'10:20',reason:'تمديد خدمة سابقة'}), h(S.QueueProgress,{done:3,ahead:2,updated:'قبل دقيقة'})));
 </script>
 </body>
 </html>

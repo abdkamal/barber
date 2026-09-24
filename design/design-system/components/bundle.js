@@ -1,4 +1,4 @@
-/* @ds-bundle: {"format": 4, "namespace": "Saloni", "components": [{"name": "Icon"}, {"name": "Button"}, {"name": "TextField"}, {"name": "SegmentedControl"}, {"name": "ServiceChip"}, {"name": "StatusBadge"}, {"name": "Avatar"}, {"name": "BarberOption"}, {"name": "EtaCard"}, {"name": "QueueItem"}, {"name": "CurrentServiceCard"}, {"name": "OfferCard"}, {"name": "ImpactList"}, {"name": "Banner"}, {"name": "ConnectionBar"}, {"name": "Switch"}, {"name": "StatTile"}, {"name": "BottomNav"}, {"name": "EmptyState"}, {"name": "CatalogItem"}, {"name": "HoursList"}, {"name": "ContactBar"}]} */
+/* @ds-bundle: {"format": 4, "namespace": "Saloni", "components": [{"name": "Icon"}, {"name": "Button"}, {"name": "TextField"}, {"name": "SegmentedControl"}, {"name": "ServiceChip"}, {"name": "StatusBadge"}, {"name": "Avatar"}, {"name": "BarberOption"}, {"name": "EtaCard"}, {"name": "QueueItem"}, {"name": "CurrentServiceCard"}, {"name": "OfferCard"}, {"name": "ImpactList"}, {"name": "Banner"}, {"name": "ConnectionBar"}, {"name": "Switch"}, {"name": "StatTile"}, {"name": "BottomNav"}, {"name": "EmptyState"}, {"name": "CatalogItem"}, {"name": "HoursList"}, {"name": "ContactBar"}, {"name": "QueueProgress"}]} */
 
 (function(){
 var R = window.React, h = R.createElement, useState = R.useState;
@@ -247,9 +247,20 @@ function ContactBar(p){
     })));
 }
 
+function QueueProgress(p){
+  var dots = [], i;
+  for (i = 0; i < (p.done || 0); i++) dots.push(h('span', { key: 'd' + i, className: 'is-done' }));
+  for (i = 0; i < (p.ahead || 0); i++) dots.push(h('span', { key: 'a' + i }));
+  dots.push(h('span', { key: 'me', className: 'is-me' }));
+  return h('section', { className: 'dw-qp', 'aria-label': 'تقدّم الطابور' },
+    h('div', { className: 'dw-qp-top' }, h('span', null, p.label || 'تقدّم الطابور'), p.updated && h('span', null, 'آخر تحديث ' + p.updated)),
+    h('div', { className: 'dw-qp-dots', 'aria-hidden': 'true' }, dots),
+    p.note && h('p', { className: 'dw-qp-note' }, p.note));
+}
+
 var api = { Icon: Icon, Button: Button, TextField: TextField, SegmentedControl: SegmentedControl, ServiceChip: ServiceChip, StatusBadge: StatusBadge,
   Avatar: Avatar, BarberOption: BarberOption, EtaCard: EtaCard, QueueItem: QueueItem, CurrentServiceCard: CurrentServiceCard, OfferCard: OfferCard,
   ImpactList: ImpactList, Banner: Banner, ConnectionBar: ConnectionBar, Switch: Switch, StatTile: StatTile, BottomNav: BottomNav, EmptyState: EmptyState,
-  CatalogItem: CatalogItem, HoursList: HoursList, ContactBar: ContactBar };
+  CatalogItem: CatalogItem, HoursList: HoursList, ContactBar: ContactBar, QueueProgress: QueueProgress };
 window.Saloni = Object.assign(window.Saloni || {}, api);
 })();

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=Readex+Pro:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=El+Messiri:wght@500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap");
 
 /* ---------- base ---------- */
 html { direction: rtl; }
@@ -90,10 +90,10 @@ body { margin: 0; font-family: var(--font-text); font-size: 15px; line-height: 2
 .dw-barber-wait { font-family: var(--font-text); font-size: 12px; line-height: 18px; color: var(--ink-muted); font-weight: 400; }
 
 /* ---------- EtaCard ---------- */
-.dw-eta { background: var(--surface-raised); border-radius: var(--radius-xl); box-shadow: var(--shadow-2); padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-2); }
+.dw-eta { background: linear-gradient(170deg, var(--surface-elevated) 0%, var(--surface-raised) 100%); border: 1px solid var(--line); border-radius: var(--radius-xl); box-shadow: var(--shadow-2); padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-2); }
 .dw-eta-top { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .dw-eta-label { margin: var(--space-2) 0 0; color: var(--ink-muted); font-size: 14px; line-height: 20px; }
-.dw-eta-time { margin: 0; font-family: var(--font-display); font-size: 48px; line-height: 52px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--primary); display: flex; align-items: baseline; gap: var(--space-2); }
+.dw-eta-time { margin: 0; font-family: var(--font-display); font-size: 48px; line-height: 56px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); display: flex; align-items: baseline; gap: var(--space-2); }
 .dw-eta-ampm { font-size: 20px; line-height: 28px; color: var(--ink-muted); font-weight: 400; }
 .dw-eta-was { margin: 0; font-size: 13px; line-height: 20px; color: var(--ink-muted); }
 .dw-eta-who { display: flex; gap: var(--space-3); align-items: center; padding-top: var(--space-3); margin-top: var(--space-2); border-top: 1px solid var(--line); }
@@ -244,6 +244,15 @@ body { margin: 0; font-family: var(--font-text); font-size: 15px; line-height: 2
 .dw-contact-addr { margin: 0; display: flex; gap: var(--space-2); align-items: flex-start; color: var(--ink-muted); font-size: 14px; line-height: 22px; }
 .dw-contact-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: var(--space-2); }
 .dw-contact-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: var(--space-3) var(--space-2); border-radius: var(--radius-md); background: var(--primary-soft); color: var(--primary); text-decoration: none; font-size: 13px; font-weight: 500; }
+
+/* ---------- QueueProgress ---------- */
+.dw-qp { background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); }
+.dw-qp-top { display: flex; justify-content: space-between; gap: var(--space-2); font-size: 13px; line-height: 20px; color: var(--ink-muted); margin-bottom: var(--space-2); }
+.dw-qp-dots { display: flex; gap: 6px; align-items: center; }
+.dw-qp-dots span { height: 8px; flex: 1; border-radius: var(--radius-full); background: var(--line); }
+.dw-qp-dots span.is-done { background: var(--primary); }
+.dw-qp-dots span.is-me { flex: 1.8; background: var(--warning); }
+.dw-qp-note { margin: var(--space-2) 0 0; font-size: 12px; line-height: 18px; color: var(--ink-subtle); }
 
 /* ---------- preview helpers ---------- */
 .pv { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); max-width: 420px; }

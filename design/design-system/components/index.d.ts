@@ -77,9 +77,12 @@ export declare function HoursList(props: HoursListProps): React.ReactElement;
 export interface ContactBarProps { address?: string; phone?: string; whatsapp?: string; maps?: boolean; instagram?: string }
 export declare function ContactBar(props: ContactBarProps): React.ReactElement;
 
+export interface QueueProgressProps { done: number; ahead: number; label?: string; updated?: string; note?: string }
+export declare function QueueProgress(props: QueueProgressProps): React.ReactElement;
+
 declare global { interface Window { Saloni: {
   Icon: typeof Icon; Button: typeof Button; TextField: typeof TextField; SegmentedControl: typeof SegmentedControl; ServiceChip: typeof ServiceChip;
   StatusBadge: typeof StatusBadge; Avatar: typeof Avatar; BarberOption: typeof BarberOption; EtaCard: typeof EtaCard; QueueItem: typeof QueueItem;
   CurrentServiceCard: typeof CurrentServiceCard; OfferCard: typeof OfferCard; ImpactList: typeof ImpactList; Banner: typeof Banner;
   ConnectionBar: typeof ConnectionBar; Switch: typeof Switch; StatTile: typeof StatTile; BottomNav: typeof BottomNav; EmptyState: typeof EmptyState;
-  CatalogItem: typeof CatalogItem; HoursList: typeof HoursList; ContactBar: typeof ContactBar } } }
+  CatalogItem: typeof CatalogItem; HoursList: typeof HoursList; ContactBar: typeof ContactBar; QueueProgress: typeof QueueProgress } } }

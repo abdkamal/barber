@@ -1,0 +1,178 @@
+<title>اتجاهات صالوني البصرية</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&family=El+Messiri:wght@500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=Noto+Kufi+Arabic:wght@500;600;700&family=Readex+Pro:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --page: #f3f5f7; --page-ink: #17212b; --page-muted: #56616d; --page-line: #d9dfe5; --page-card: #ffffff;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --page: #0f1419; --page-ink: #e8edf2; --page-muted: #9aa6b2; --page-line: #26303a; --page-card: #161d24; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --page: #0f1419; --page-ink: #e8edf2; --page-muted: #9aa6b2; --page-line: #26303a; --page-card: #161d24; color-scheme: dark; }
+
+  html { direction: rtl; }
+  body { background: var(--page); color: var(--page-ink); font-family: "IBM Plex Sans Arabic", system-ui, sans-serif; margin: 0; }
+  .wrap { max-width: 1320px; margin: 0 auto; padding-inline: 16px; padding-block: 32px 48px; }
+  header.intro { max-width: 68ch; margin-bottom: 28px; }
+  header.intro h1 { font-family: "Readex Pro", sans-serif; font-weight: 600; font-size: 28px; line-height: 38px; margin: 0 0 8px; text-wrap: balance; }
+  header.intro p { margin: 0; color: var(--page-muted); font-size: 15px; line-height: 26px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 20px; align-items: start; }
+  .dir { background: var(--page-card); border: 1px solid var(--page-line); border-radius: 20px; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+  .dir-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .dir-head h2 { margin: 0; font-family: "Readex Pro", sans-serif; font-size: 19px; line-height: 28px; font-weight: 600; }
+  .dir-tag { font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--page-line); color: var(--page-muted); white-space: nowrap; }
+  .dir-desc { margin: 0; font-size: 14px; line-height: 23px; color: var(--page-muted); min-height: 69px; }
+  .swatches { display: flex; gap: 6px; }
+  .swatches span { flex: 1; height: 34px; border-radius: 8px; border: 1px solid rgba(128,128,128,.25); }
+  .fonts { font-size: 13px; line-height: 20px; color: var(--page-muted); margin: 0; }
+  .fonts b { color: var(--page-ink); font-weight: 600; }
+
+  /* ---------- phone mock (each direction sets its own tokens) ---------- */
+  .phone { background: var(--bg); color: var(--ink); border-radius: 30px; padding: 14px 14px 0; border: 6px solid #1c232b; overflow: hidden; font-family: var(--text); display: flex; flex-direction: column; gap: 12px; }
+  .ph-top { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px; }
+  .ph-salon { display: flex; gap: 8px; align-items: center; }
+  .ph-logo { width: 34px; height: 34px; border-radius: var(--r-sm); background: var(--primary); color: var(--on-primary); display: grid; place-items: center; font-family: var(--display); font-weight: 600; font-size: 15px; }
+  .ph-salon b { font-family: var(--display); font-weight: 600; font-size: 15px; display: block; line-height: 20px; }
+  .ph-salon small { color: var(--muted); font-size: 11px; line-height: 16px; }
+  .ph-bell { width: 34px; height: 34px; border-radius: 50%; background: var(--card); display: grid; place-items: center; color: var(--muted); box-shadow: var(--shadow); }
+  .eta { background: var(--eta-bg); color: var(--eta-ink); border-radius: var(--r-lg); padding: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; border: var(--eta-border); }
+  .badge { align-self: flex-start; display: inline-flex; gap: 6px; align-items: center; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 999px; background: var(--badge-bg); color: var(--badge-ink); }
+  .badge i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .eta-label { margin: 4px 0 0; font-size: 12px; color: var(--eta-muted); }
+  .eta-time { margin: 0; font-family: var(--display); font-weight: var(--time-w); font-size: 46px; line-height: 50px; font-variant-numeric: tabular-nums; color: var(--eta-time); display: flex; gap: 6px; align-items: baseline; }
+  .eta-time small { font-size: 17px; color: var(--eta-muted); font-weight: 400; }
+  .eta-was { margin: 0; font-size: 11.5px; color: var(--eta-muted); }
+  .eta-who { display: flex; gap: 10px; align-items: center; border-top: 1px solid var(--eta-line); padding-top: 10px; margin-top: 4px; }
+  .av { width: 32px; height: 32px; border-radius: 50%; background: var(--soft); color: var(--primary-text); display: grid; place-items: center; font-family: var(--display); font-weight: 600; font-size: 13px; }
+  .eta-who b { font-size: 13.5px; display: block; line-height: 18px; }
+  .eta-who small { font-size: 11.5px; color: var(--eta-muted); }
+  .called { display: flex; gap: 10px; align-items: center; background: var(--warn-soft); color: var(--warn); border-radius: var(--r-md); padding: 10px 12px; font-size: 12.5px; line-height: 18px; font-weight: 500; }
+  .called svg { flex: none; }
+  .progress { background: var(--card); border-radius: var(--r-md); padding: 12px; box-shadow: var(--shadow-soft); }
+  .progress-top { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .dots { display: flex; gap: 6px; align-items: center; }
+  .dots span { height: 8px; flex: 1; border-radius: 999px; background: var(--track); }
+  .dots span.done { background: var(--primary); }
+  .dots span.me { background: var(--warn); flex: 1.6; }
+  .btns { display: flex; gap: 8px; }
+  .btn { flex: 1; border: 0; font: inherit; font-weight: 600; font-size: 13.5px; height: 44px; border-radius: var(--r-btn); cursor: default; }
+  .btn-p { background: var(--primary); color: var(--on-primary); }
+  .btn-s { background: var(--card); color: var(--ink); border: 1px solid var(--line-strong); }
+  .nav { display: flex; background: var(--card); margin: 0 -14px; padding: 8px 6px 10px; border-top: 1px solid var(--line); }
+  .nav span { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; color: var(--muted); }
+  .nav span.on { color: var(--primary-text); font-weight: 600; }
+  .nav span i { width: 38px; height: 22px; border-radius: 999px; display: grid; place-items: center; }
+  .nav span.on i { background: var(--soft); }
+
+  /* ---------- A: current — بحري ---------- */
+  .d-current { --bg:#f4f7f8; --card:#ffffff; --ink:#10252b; --muted:#4a6067; --line:#d6e0e3; --line-strong:#78909a; --primary:#0b6b70; --primary-text:#0b6b70; --on-primary:#ffffff;
+    --soft:#dbeeee; --warn:#875000; --warn-soft:#fcefd8; --track:#e8eef0;
+    --eta-bg:#ffffff; --eta-ink:#10252b; --eta-muted:#4a6067; --eta-time:#0b6b70; --eta-line:#d6e0e3; --eta-border:0; --badge-bg:#e8eef0; --badge-ink:#4a6067;
+    --display:"Readex Pro", sans-serif; --text:"IBM Plex Sans Arabic", sans-serif; --time-w:500;
+    --r-sm:10px; --r-md:14px; --r-lg:26px; --r-btn:14px; --shadow:0 8px 24px rgba(16,37,43,.10); --shadow-soft:0 1px 3px rgba(16,37,43,.06); }
+
+  /* ---------- B: ضباب — Mist ---------- */
+  .d-mist { --bg:#eaf1f8; --card:#ffffff; --ink:#142238; --muted:#546580; --line:#dbe4ef; --line-strong:#8193ab; --primary:#2d5d9a; --primary-text:#2d5d9a; --on-primary:#ffffff;
+    --soft:#e1ebf7; --warn:#8a5500; --warn-soft:#fdf0db; --track:#e4ebf4;
+    --eta-bg:linear-gradient(160deg,#ffffff 0%,#f4f8fd 100%); --eta-ink:#142238; --eta-muted:#546580; --eta-time:#142238; --eta-line:#e2e9f2; --eta-border:1px solid #ffffff;
+    --badge-bg:#e1ebf7; --badge-ink:#2d5d9a;
+    --display:"Alexandria", sans-serif; --text:"IBM Plex Sans Arabic", sans-serif; --time-w:600;
+    --r-sm:12px; --r-md:18px; --r-lg:30px; --r-btn:18px; --shadow:0 12px 32px rgba(45,93,154,.12); --shadow-soft:0 4px 14px rgba(45,93,154,.08); }
+
+  /* ---------- C: نعناع — Mint frost ---------- */
+  .d-mint { --bg:#edf5f2; --card:#fbfefd; --ink:#12302a; --muted:#4a6861; --line:#d5e6e0; --line-strong:#7a9790; --primary:#1f6f60; --primary-text:#1f6f60; --on-primary:#ffffff;
+    --soft:#d6eee6; --warn:#835600; --warn-soft:#fbf0d9; --track:#dfece7;
+    --eta-bg:#1f6f60; --eta-ink:#ffffff; --eta-muted:#e3f4ee; --eta-time:#ffffff; --eta-line:rgba(255,255,255,.22); --eta-border:0;
+    --badge-bg:rgba(255,255,255,.18); --badge-ink:#ffffff;
+    --display:"Noto Kufi Arabic", sans-serif; --text:"IBM Plex Sans Arabic", sans-serif; --time-w:600;
+    --r-sm:999px; --r-md:20px; --r-lg:28px; --r-btn:999px; --shadow:0 10px 28px rgba(31,111,96,.18); --shadow-soft:0 1px 3px rgba(18,48,42,.06); }
+  .d-mint .eta .av { background: rgba(255,255,255,.2); color: #ffffff; }
+
+  /* ---------- D: ليل الخليج — Gulf night ---------- */
+  .d-night { --bg:#0e1726; --card:#16233a; --ink:#eaf1f8; --muted:#a3b3c8; --line:#23324b; --line-strong:#4c607e; --primary:#8cc8e6; --primary-text:#8cc8e6; --on-primary:#0b1a2a;
+    --soft:#1d3350; --warn:#f2c27a; --warn-soft:#3a2d17; --track:#23324b;
+    --eta-bg:linear-gradient(170deg,#1b2b46 0%,#152238 100%); --eta-ink:#eaf1f8; --eta-muted:#a3b3c8; --eta-time:#eaf1f8; --eta-line:#2a3b58; --eta-border:1px solid #2a3b58;
+    --badge-bg:#1d3350; --badge-ink:#8cc8e6;
+    --display:"El Messiri", serif; --text:"IBM Plex Sans Arabic", sans-serif; --time-w:600;
+    --r-sm:10px; --r-md:14px; --r-lg:22px; --r-btn:12px; --shadow:0 10px 30px rgba(0,0,0,.35); --shadow-soft:0 1px 2px rgba(0,0,0,.3); }
+  .d-night .phone { border-color: #05080d; }
+
+  .note { margin-top: 28px; font-size: 14px; line-height: 24px; color: var(--page-muted); max-width: 72ch; }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <h1>اختر اتجاه «صالوني» البصري</h1>
+    <p>أربعة اتجاهات، كلها باردة وناعمة، على شاشة متابعة الزبون نفسها. الأول هو النظام المنشور حاليًا للمقارنة. اختر اتجاهًا، أو اطلب مزيجًا، مثل ألوان «نعناع» بخط «ضباب»، وسأبني النظام الكامل عليه.</p>
+  </header>
+
+  <div class="grid">
+    <!-- A -->
+    <section class="dir d-current">
+      <div class="dir-head"><h2>١ · بحري</h2><span class="dir-tag">الحالي</span></div>
+      <p class="dir-desc">بحري عميق على رمادي مائل للأخضر المزرق. متزن وعملي، بطاقات بيضاء بحدود خفيفة، والوقت بلون الهوية.</p>
+      <div class="swatches"><span style="background:#0b6b70"></span><span style="background:#355f88"></span><span style="background:#dbeeee"></span><span style="background:#f4f7f8"></span><span style="background:#10252b"></span></div>
+      <p class="fonts"><b>Readex Pro</b> للعناوين · <b>IBM Plex Sans Arabic</b> للنص</p>
+      <div class="phone" aria-label="معاينة شاشة المتابعة — بحري">
+        <div class="ph-top"><div class="ph-salon"><span class="ph-logo">ر</span><div><b>صالون الراحة</b><small>حي النرجس</small></div></div><span class="ph-bell"><svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z"/></svg></span></div>
+        <div class="eta"><span class="badge"><i></i>بانتظار الدور</span><p class="eta-label">يُتوقع أن تبدأ خدمتك</p><p class="eta-time">10:40<small>ص</small></p><p class="eta-was">كان متوقعًا 10:20 — تمديد خدمة سابقة</p>
+          <div class="eta-who"><span class="av">خح</span><div><b>خالد الحربي</b><small>شعر ولحية · 45 دقيقة</small></div></div></div>
+        <div class="progress"><div class="progress-top"><span>تقدّم الطابور</span><span>آخر تحديث قبل دقيقة</span></div><div class="dots"><span class="done"></span><span class="done"></span><span></span><span class="me"></span></div></div>
+        <div class="btns"><button class="btn btn-p" type="button">تعديل الوقت</button><button class="btn btn-s" type="button">إلغاء الحجز</button></div>
+        <div class="nav"><span class="on"><i>●</i>حجزي</span><span><i>○</i>الصالون</span><span><i>○</i>السجل</span><span><i>○</i>حسابي</span></div>
+      </div>
+    </section>
+
+    <!-- B -->
+    <section class="dir d-mist">
+      <div class="dir-head"><h2>٢ · ضباب</h2><span class="dir-tag">هادئ وفاخر</span></div>
+      <p class="dir-desc">أزرق صباحي هادئ على خلفية جليدية. بطاقات عائمة بظلال زرقاء ناعمة وزوايا كبيرة، ومساحات بيضاء واسعة. أخف وأكثر أناقة.</p>
+      <div class="swatches"><span style="background:#2d5d9a"></span><span style="background:#e1ebf7"></span><span style="background:#eaf1f8"></span><span style="background:#ffffff"></span><span style="background:#142238"></span></div>
+      <p class="fonts"><b>Alexandria</b> للعناوين · <b>IBM Plex Sans Arabic</b> للنص</p>
+      <div class="phone" aria-label="معاينة شاشة المتابعة — ضباب">
+        <div class="ph-top"><div class="ph-salon"><span class="ph-logo">ر</span><div><b>صالون الراحة</b><small>حي النرجس</small></div></div><span class="ph-bell"><svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z"/></svg></span></div>
+        <div class="eta"><span class="badge"><i></i>بانتظار الدور</span><p class="eta-label">يُتوقع أن تبدأ خدمتك</p><p class="eta-time">10:40<small>ص</small></p><p class="eta-was">كان متوقعًا 10:20 — تمديد خدمة سابقة</p>
+          <div class="eta-who"><span class="av">خح</span><div><b>خالد الحربي</b><small>شعر ولحية · 45 دقيقة</small></div></div></div>
+        <div class="progress"><div class="progress-top"><span>تقدّم الطابور</span><span>آخر تحديث قبل دقيقة</span></div><div class="dots"><span class="done"></span><span class="done"></span><span></span><span class="me"></span></div></div>
+        <div class="btns"><button class="btn btn-p" type="button">تعديل الوقت</button><button class="btn btn-s" type="button">إلغاء الحجز</button></div>
+        <div class="nav"><span class="on"><i>●</i>حجزي</span><span><i>○</i>الصالون</span><span><i>○</i>السجل</span><span><i>○</i>حسابي</span></div>
+      </div>
+    </section>
+
+    <!-- C -->
+    <section class="dir d-mint">
+      <div class="dir-head"><h2>٣ · نعناع</h2><span class="dir-tag">منعش وودود</span></div>
+      <p class="dir-desc">أخضر نعناعي بارد مع خلفية بلون الثلج المخضر. بطاقة الوقت ممتلئة بلون الهوية، وأزرار دائرية كاملة، وخط كوفي حديث. الأكثر حيوية وتميزًا.</p>
+      <div class="swatches"><span style="background:#1f6f60"></span><span style="background:#d6eee6"></span><span style="background:#edf5f2"></span><span style="background:#fbfefd"></span><span style="background:#12302a"></span></div>
+      <p class="fonts"><b>Noto Kufi Arabic</b> للعناوين · <b>IBM Plex Sans Arabic</b> للنص</p>
+      <div class="phone" aria-label="معاينة شاشة المتابعة — نعناع">
+        <div class="ph-top"><div class="ph-salon"><span class="ph-logo">ر</span><div><b>صالون الراحة</b><small>حي النرجس</small></div></div><span class="ph-bell"><svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z"/></svg></span></div>
+        <div class="eta"><span class="badge"><i></i>بانتظار الدور</span><p class="eta-label">يُتوقع أن تبدأ خدمتك</p><p class="eta-time">10:40<small>ص</small></p><p class="eta-was">كان متوقعًا 10:20 — تمديد خدمة سابقة</p>
+          <div class="eta-who"><span class="av">خح</span><div><b>خالد الحربي</b><small>شعر ولحية · 45 دقيقة</small></div></div></div>
+        <div class="progress"><div class="progress-top"><span>تقدّم الطابور</span><span>آخر تحديث قبل دقيقة</span></div><div class="dots"><span class="done"></span><span class="done"></span><span></span><span class="me"></span></div></div>
+        <div class="btns"><button class="btn btn-p" type="button">تعديل الوقت</button><button class="btn btn-s" type="button">إلغاء الحجز</button></div>
+        <div class="nav"><span class="on"><i>●</i>حجزي</span><span><i>○</i>الصالون</span><span><i>○</i>السجل</span><span><i>○</i>حسابي</span></div>
+      </div>
+    </section>
+
+    <!-- D -->
+    <section class="dir d-night">
+      <div class="dir-head"><h2>٤ · ليل الخليج</h2><span class="dir-tag">داكن وراقٍ</span></div>
+      <p class="dir-desc">كحلي ليلي عميق مع أزرق جليدي فضي. داكن أولًا، بطابع صالونات الحلاقة الراقية، وخط عناوين عربي أنيق. الوضع الفاتح يكون مشتقًا منه.</p>
+      <div class="swatches"><span style="background:#8cc8e6"></span><span style="background:#1d3350"></span><span style="background:#16233a"></span><span style="background:#0e1726"></span><span style="background:#eaf1f8"></span></div>
+      <p class="fonts"><b>El Messiri</b> للعناوين · <b>IBM Plex Sans Arabic</b> للنص</p>
+      <div class="phone" aria-label="معاينة شاشة المتابعة — ليل الخليج">
+        <div class="ph-top"><div class="ph-salon"><span class="ph-logo">ر</span><div><b>صالون الراحة</b><small>حي النرجس</small></div></div><span class="ph-bell"><svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z"/></svg></span></div>
+        <div class="eta"><span class="badge"><i></i>بانتظار الدور</span><p class="eta-label">يُتوقع أن تبدأ خدمتك</p><p class="eta-time">10:40<small>ص</small></p><p class="eta-was">كان متوقعًا 10:20 — تمديد خدمة سابقة</p>
+          <div class="eta-who"><span class="av">خح</span><div><b>خالد الحربي</b><small>شعر ولحية · 45 دقيقة</small></div></div></div>
+        <div class="progress"><div class="progress-top"><span>تقدّم الطابور</span><span>آخر تحديث قبل دقيقة</span></div><div class="dots"><span class="done"></span><span class="done"></span><span></span><span class="me"></span></div></div>
+        <div class="btns"><button class="btn btn-p" type="button">تعديل الوقت</button><button class="btn btn-s" type="button">إلغاء الحجز</button></div>
+        <div class="nav"><span class="on"><i>●</i>حجزي</span><span><i>○</i>الصالون</span><span><i>○</i>السجل</span><span><i>○</i>حسابي</span></div>
+      </div>
+    </section>
+  </div>
+
+  <p class="note">كل اتجاه سيحصل على وضعين، فاتح وداكن، وتُفحص ألوانه للوضوح. ويبقى لون الانتباه الدافئ في كل الاتجاهات لحالة «اقترب دورك» فقط. شريط تقدّم الطابور في المعاينات عنصر مقترح جديد، يعرض الأدوار المنجزة ودورك دون ذكر رقم.</p>
+</div>
