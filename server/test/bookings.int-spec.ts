@@ -97,7 +97,9 @@ describe('bookings', () => {
 
     const hist = await ctx.http().get('/v1/customer/history').set(auth(c.token));
     expect(hist.body).toEqual([expect.objectContaining({ id, status: 'done', payment: { status: 'confirmed', amountCents: 5000 } })]);
-    expect((await ctx.http().get('/v1/bookings/current').set(auth(c.token))).status).toBe(404);
+    const none = await ctx.http().get('/v1/bookings/current').set(auth(c.token));
+    expect(none.status).toBe(200);
+    expect(none.body.booking).toBeNull();
 
     await settle(ctx);
     const sent = await notifications(ctx, s, 'recipient_id = $1', [c.id]);

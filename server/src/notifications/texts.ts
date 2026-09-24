@@ -30,6 +30,10 @@ export const Texts = {
     title: 'أُلغي حجزك',
     body: `نعتذر، أُلغي حجزك لتجاوز وقت الإغلاق — ${reason}`,
   }),
+  transferred: (barber: string, eta: number, tz: string): Text => ({
+    title: 'نُقل حجزك',
+    body: `نُقل حجزك إلى ${barber} — الوقت المتوقع ${formatArabicTime(eta, tz)}`,
+  }),
   overrun: (customer: string): Text => ({
     title: 'تجاوز المدة',
     body: `تجاوزت خدمة ${customer} مدتها المقدرة — لا تنسَ الضغط على «إنهاء»`,
@@ -45,5 +49,9 @@ export const Texts = {
   syncConflict: (barber: string, customer: string, what: string): Text => ({
     title: 'تعارض مزامنة',
     body: `تعارض مزامنة لدى ${barber} في حجز ${customer}: ${what} — راجعه من شاشة المعلّقات`,
+  }),
+  baseDurationSuspect: (services: string, barber: string, baseMin: number): Text => ({
+    title: 'راجع مدة خدمة',
+    body: `مدد «${services}» الفعلية لدى ${barber} تختلف كثيرًا عن المدة الأساسية (${nf.format(baseMin)} د) — راجعها من شاشة الخدمات`,
   }),
 };

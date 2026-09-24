@@ -441,7 +441,8 @@ export class BookingService {
       [me.subjectId, new Date(now - ACTIVE_BOOKING_MAX_AGE_MS)],
     );
     const row = rows[0];
-    if (!row) throw QErrors.noActiveBooking();
+    // No active booking is a normal state, not an error (api.md): 200 with `booking: null`.
+    if (!row) return { booking: null, serverTime: iso(now) };
     const shift = await shiftForDate(t.db, t.salon.timezone, row.staff_id, row.work_date);
     const ctx = await loadDay(t.db, t.salon, row.staff_id, shift, now);
     const slots = project(ctx);

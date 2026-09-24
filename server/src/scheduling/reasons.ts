@@ -22,6 +22,8 @@ export const REASONS = {
   reconnected: 'وصلنا تحديث من الصالون بعد انقطاع',
   sync_conflict: 'تصحيح من جهاز الحلاق',
   walk_in: 'أُضيف زبون حاضر',
+  transferred: 'نقل المدير حجزك إلى حلاق آخر',
+  transferred_ahead: 'نُقل حجز زبون قبلك إلى حلاق آخر',
 } as const;
 
 export type ReasonCode = keyof typeof REASONS;

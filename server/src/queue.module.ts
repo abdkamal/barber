@@ -2,6 +2,8 @@ import { Logger, Module } from '@nestjs/common';
 import { APP_CONFIG, AppConfig } from './config/config';
 import { BookingService } from './bookings/booking.service';
 import { BookingsController } from './bookings/bookings.controller';
+import { ManagerQueuesController } from './manager-queues/manager-queues.controller';
+import { ManagerQueuesService } from './manager-queues/manager-queues.service';
 import { DevicesController } from './notifications/devices.controller';
 import { NotificationService } from './notifications/notification.service';
 import { DisabledNotifier, FakeNotifier, FcmNotifier, fcmCredentialsFromEnv, NOTIFIER, type Notifier } from './notifications/notifier';
@@ -29,7 +31,7 @@ function notifierFor(config: AppConfig): Notifier {
  * TenantContext of the verified token (or, for the scheduler, TenantResolver per salon).
  */
 @Module({
-  controllers: [BookingsController, StaffDayController, SyncController, DevicesController],
+  controllers: [BookingsController, StaffDayController, SyncController, DevicesController, ManagerQueuesController],
   providers: [
     Clock,
     ChangeBus,
@@ -38,6 +40,7 @@ function notifierFor(config: AppConfig): Notifier {
     PostCommit,
     BookingService,
     StaffDayService,
+    ManagerQueuesService,
     SyncService,
     StaffStream,
     SchedulerService,

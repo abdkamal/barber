@@ -45,7 +45,8 @@ describe('queue endpoints — tenant isolation and roles', () => {
       expect(r.status).toBe(404);
     }
     const cur = await crafted(ctx.http().get('/v1/bookings/current').set(h));
-    expect(cur.status).toBe(404);
+    expect(cur.status).toBe(200);
+    expect(cur.body.booking).toBeNull();
     const offerByA = await crafted(ctx.http().post('/v1/bookings').set(h)).send({ offerId: bookingA });
     expect(offerByA.status).toBe(404);
     const hist = await crafted(ctx.http().get('/v1/customer/history').set(h));

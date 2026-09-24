@@ -9,6 +9,7 @@ import { normalizeSalonCode, SALON_CODE_RE } from '../common/normalize';
 import { ZodPipe } from '../common/zod.pipe';
 import { clientIp } from '../security/client-ip';
 import { RateLimit } from '../security/rate-limit.guard';
+import { mediaUrl as toMediaUrl } from '../storage/media-url';
 import { TenantResolver } from '../tenancy/tenant-resolver.service';
 import { ProvisioningService } from './provisioning.service';
 
@@ -76,7 +77,7 @@ export class SalonsController {
     ]);
     const salonCode = found.record.code;
     // Stored paths are `{salonId}/{file}`; the public URL is keyed by salon code (media controller).
-    const mediaUrl = (path: string | null | undefined) => (path ? `/v1/media/${salonCode}/${path.split('/').pop()}` : null);
+    const mediaUrl = (path: string | null | undefined) => toMediaUrl(salonCode, path);
     const p = profile.rows[0] ?? {};
     return {
       code: salonCode,

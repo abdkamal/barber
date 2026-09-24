@@ -16,7 +16,8 @@ export type NotificationType =
   | 'account_pending'
   | 'barber_not_connected'
   | 'barber_absent'
-  | 'sync_conflict';
+  | 'sync_conflict'
+  | 'base_duration_suspect';
 
 export interface NotificationInput {
   type: NotificationType;

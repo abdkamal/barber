@@ -1,5 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  baseDurationSuspect,
   canMarkNoShow,
   changeDuration,
   finishService,
@@ -395,11 +396,41 @@ export class SyncService {
         measured === null ? (c.approximate || approxStart.length ? 'approximate_time' : 'invalid_times') : null,
       ],
     );
+    if (measured !== null) await this.checkBaseDuration(q, effects, ctx, row);
     const { rows: svc } = await q.query<{ total: string }>('SELECT COALESCE(sum(price_minor), 0) AS total FROM booking_services WHERE booking_id = $1', [row.id]);
     await q.query('INSERT INTO payments (booking_id, amount_minor) VALUES ($1, $2) ON CONFLICT (booking_id) DO NOTHING', [row.id, Number(svc[0]!.total)]);
     await emitBooking(q, ctx, row.id, 'booking_updated', effects);
     await emitChange(q, effects, { staffId: row.staff_id, type: 'payment_updated', entity: 'payment', bookingId: row.id, data: { bookingId: row.id, status: 'awaiting_confirmation', amountCents: Number(svc[0]!.total) } });
     return {};
+  }
+
+  /**
+   * Design §5.10: when most of a barber's recent samples for a service set fall outside the
+   * plausible range around the configured base duration, the base is probably wrong — tell the
+   * managers (once per service set and business day).
+   */
+  private async checkBaseDuration(q: TenantQueryable, effects: Effects, ctx: DayCtx, row: BookingRow): Promise<void> {
+    const setKey = row.service_set_key ?? '';
+    const { rows: svc } = await q.query<{ name: string; base: number }>(
+      `SELECT bs.name_snapshot AS name, s.base_duration_minutes AS base
+         FROM booking_services bs JOIN services s ON s.id = bs.service_id WHERE bs.booking_id = $1 ORDER BY bs.position`,
+      [row.id],
+    );
+    if (!svc.length) return;
+    const baseMin = svc.reduce((a, r) => a + r.base, 0);
+    const { rows: samples } = await q.query<{ d: number }>(
+      `SELECT duration_seconds AS d FROM duration_samples
+        WHERE staff_id = $1 AND service_set_key = $2 AND NOT excluded ORDER BY recorded_at DESC, id LIMIT 20`,
+      [row.staff_id, setKey],
+    );
+    const recent = samples.map((r) => r.d * 1000).reverse();
+    if (!baseDurationSuspect(baseMin * MINUTE, recent)) return;
+    await this.notifications.toManagers(q, effects, {
+      type: 'base_duration_suspect',
+      text: Texts.baseDurationSuspect(svc.map((r) => r.name).join(' + '), ctx.staff.name, baseMin),
+      dedupeKey: `base_duration_suspect:${setKey}:${ctx.shift.workDate}`,
+      data: { serviceSetKey: setKey, barberId: row.staff_id, baseDurationMin: String(baseMin) },
+    });
   }
 
   /** ق9: always accepted; the session is not re-timed, only the estimate (and the price) change. */

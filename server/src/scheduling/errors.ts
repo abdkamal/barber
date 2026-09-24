@@ -17,11 +17,14 @@ export const QErrors = {
   offerExpired: () => new ApiError(HttpStatus.GONE, 'OFFER_EXPIRED', 'انتهت مدة العرض، اطلب وقتًا جديدًا'),
   offerNotFound: () => new ApiError(HttpStatus.NOT_FOUND, 'OFFER_NOT_FOUND', 'العرض غير موجود'),
   bookingNotFound: () => new ApiError(HttpStatus.NOT_FOUND, 'BOOKING_NOT_FOUND', 'الحجز غير موجود'),
-  noActiveBooking: () => new ApiError(HttpStatus.NOT_FOUND, 'NO_ACTIVE_BOOKING', 'لا يوجد حجز نشط'),
   bookingStarted: () => new ApiError(HttpStatus.CONFLICT, 'BOOKING_STARTED', 'بدأت خدمتك بالفعل'),
   bookingNotActive: () => new ApiError(HttpStatus.CONFLICT, 'BOOKING_NOT_ACTIVE', 'هذا الحجز لم يعد نشطًا'),
   alreadyCalled: () => new ApiError(HttpStatus.CONFLICT, 'BOOKING_CALLED', 'تم استدعاؤك بالفعل؛ لا يمكن تعديل الوقت الآن'),
   pastClosing: () => new ApiError(HttpStatus.CONFLICT, 'PAST_CLOSING', 'لا يتسع الوقت قبل الإغلاق لإضافة هذا الزبون'),
   notWorkingNow: () => new ApiError(HttpStatus.CONFLICT, 'NOT_WORKING_NOW', 'لا يوجد دوام لك الآن'),
+  sameBarber: () => new ApiError(HttpStatus.CONFLICT, 'TRANSFER_SAME_BARBER', 'الحجز عند هذا الحلاق بالفعل'),
+  barberNotWorking: () => new ApiError(HttpStatus.CONFLICT, 'BARBER_NOT_WORKING', 'الحلاق المختار ليس في دوامه اليوم'),
+  transferNoSlot: (details: unknown) =>
+    new ApiError(HttpStatus.CONFLICT, 'TRANSFER_NO_SLOT', 'لا يتسع وقت هذا الحلاق اليوم لهذا الحجز دون تأخير أحد', undefined, details),
   invalidPhone: () => new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', 'رقم الهاتف غير صحيح'),
 };

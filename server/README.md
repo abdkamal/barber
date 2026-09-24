@@ -89,6 +89,7 @@ Errors: `{"error":{"code":"UPPER_SNAKE","message":"نص عربي"}}`; `429` carr
 | `GET /v1/staff/today`, `POST /v1/staff/walk-ins`, `POST /v1/staff/impact`, `GET /v1/staff/payments`, `POST /v1/heartbeat`, `POST /v1/sync/events`, `GET /v1/sync?since=` | barber, manager (own queue; managers see all payments/changes) |
 | `WS /v1/staff/stream` | barber, manager (access token in `Authorization` or `?access_token=`) |
 | `POST /v1/devices` | any signed-in user |
+| `GET /v1/manager/queues`, `POST /v1/manager/bookings/{id}/transfer` | manager (ق25: all queues today; manual transfer under ق4, both barber days locked in id order, customer notified) |
 
 Shapes are pinned in `docs/api.md` ("أشكال مثبّتة"). Booking-changing requests honour `Idempotency-Key`
 (stored per account in `idempotency_keys`; a replay returns the first result, including a remembered 409 offer).
@@ -141,6 +142,7 @@ src/
   scheduling/    engine bridge: business day, day loading, queue persistence, idempotency, clock
   bookings/      customer booking endpoints
   staff-day/     barber endpoints (today, walk-ins, impact, payments, heartbeat)
+  manager-queues/ manager: all queues today, manual transfer (ق25)
   sync/          device events, change feed, WebSocket stream
   scheduler/     background loop
   notifications/ notifier (FCM / fake / disabled), texts, outbox dispatch, devices

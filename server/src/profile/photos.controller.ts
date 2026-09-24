@@ -10,6 +10,7 @@ import { clientIp } from '../security/client-ip';
 import { ImageStorageService, MAX_UPLOAD_BYTES, splitStoredPath } from '../storage/image-storage.service';
 import type { TenantContext } from '../tenancy/tenant-context';
 import { CurrentPrincipal, Tenant } from '../tenancy/tenant.decorator';
+import { mediaUrl } from '../storage/media-url';
 import { PhotosRepo, ProfileRepo } from './profile.repository';
 
 const uuid = new ParseUUIDPipe({ version: '4', exceptionFactory: () => Errors.notFound() });
@@ -39,7 +40,7 @@ export class PhotosController {
         actorKind: 'staff', actorId: me.subjectId, action: 'profile.photo_added', targetKind: 'salon_photo', targetId: row.id,
         ip: clientIp(req),
       });
-      return { id: row.id, path: row.path, position: row.position };
+      return { id: row.id, path: row.path, url: mediaUrl(t.salon.code, row.path), position: row.position };
     });
   }
 
@@ -79,7 +80,7 @@ export class PhotosController {
       const parts = splitStoredPath(old);
       if (parts) await this.storage.remove(parts.salonId, parts.filename);
     }
-    return { logo: stored.path };
+    return { logo: mediaUrl(t.salon.code, stored.path), path: stored.path };
   }
 
   @Delete('profile/logo')

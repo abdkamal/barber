@@ -10,7 +10,8 @@ import { writeAudit } from '../security/audit';
 import { clientIp } from '../security/client-ip';
 import type { TenantContext } from '../tenancy/tenant-context';
 import { CurrentPrincipal, Tenant } from '../tenancy/tenant.decorator';
-import { ProfileRepo, SalonProfileRow } from './profile.repository';
+import { mediaUrl } from '../storage/media-url';
+import { PhotosRepo, ProfileRepo, SalonPhotoRow, SalonProfileRow } from './profile.repository';
 
 const SocialLink = z.object({
   platform: z.string().trim().min(1).max(40),
@@ -31,11 +32,14 @@ const UpdateProfile = z
   })
   .strict();
 
-function toDto(r: SalonProfileRow) {
+function toDto(t: TenantContext, r: SalonProfileRow, photos: SalonPhotoRow[]) {
   return {
+    code: t.salon.code,
     name: r.name,
     about: r.about,
-    logo: r.logo_path,
+    // Same media URLs as the public profile (GET /v1/media/{code}/{file}; served once the salon is active).
+    logo: mediaUrl(t.salon.code, r.logo_path),
+    photos: photos.map((p) => ({ id: p.id, url: mediaUrl(t.salon.code, p.path)!, position: p.position })),
     address: r.address,
     location: r.latitude != null ? { lat: r.latitude, lng: r.longitude } : null,
     phone: r.phone,
@@ -51,7 +55,7 @@ function toDto(r: SalonProfileRow) {
 export class ProfileController {
   @Get()
   async get(@Tenant() t: TenantContext) {
-    return toDto(await ProfileRepo.get(t.db));
+    return toDto(t, await ProfileRepo.get(t.db), await PhotosRepo.list(t.db));
   }
 
   @Put()
@@ -87,7 +91,7 @@ export class ProfileController {
         actorKind: 'staff', actorId: me.subjectId, action: 'profile.updated', targetKind: 'salon_profile', ip: clientIp(req),
         details: { changed: Object.keys(patch) },
       });
-      return toDto(row);
+      return toDto(t, row, await PhotosRepo.list(q));
     });
   }
 }
