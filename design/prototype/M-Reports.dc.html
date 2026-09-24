@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>التقارير</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/saloni/tokens.css">
+<link rel="stylesheet" href="ds/saloni/components/bundle.css">
+<script src="ds/saloni/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=El+Messiri:wght@500;600;700&amp;family=IBM+Plex+Sans+Arabic:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap">
+<style>
+body{margin:0;background:#0e1726;font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;color:#eaf1f8}
+a{color:#8cc8e6}a:hover{color:#b3dcf0}
+</style>
+</helmet>
+<div dir="rtl" style="width: 390px; height: 1180px; box-sizing: border-box; background: var(--surface); color: var(--ink); font-family: var(--font-text); display: flex; flex-direction: column; position: relative; overflow: hidden">
+<header style="display: flex; align-items: center; gap: 12px; padding: 16px 16px 8px"><div style="flex-grow: 1"><h1 style="margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 24px; line-height: 34px">التقارير</h1><p style="margin: 0; font-size: 13px; line-height: 20px; color: var(--ink-muted)">صالون الراحة</p></div></header><main style="flex-grow: 1; display: flex; flex-direction: column; gap: 20px; padding: 8px 16px 12px; overflow: hidden"><x-import component-from-global-scope="Saloni.SegmentedControl" label="الفترة" options="{{periodOpts}}"></x-import><div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px"><x-import component-from-global-scope="Saloni.StatTile" label="الإيراد المؤكد" value="1,240" unit="ر.س" delta="+12% عن الأربعاء الماضي" delta-tone="success" series="{{revSeries}}"></x-import><x-import component-from-global-scope="Saloni.StatTile" label="بانتظار التأكيد" value="100" unit="ر.س" delta="زيارتان" delta-tone="warning"></x-import><x-import component-from-global-scope="Saloni.StatTile" label="الزيارات المنجزة" value="27" delta="2 لم يحضر · 1 ملغى"></x-import><x-import component-from-global-scope="Saloni.StatTile" label="دقة الأوقات المتوقعة" value="±7" unit="د" series="{{accSeries}}"></x-import></div><section style="display: flex; flex-direction: column; gap: 10px"><h2 style="margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 18px; line-height: 28px">حسب الحلاق</h2><div style="background: var(--surface-raised); border: 1px solid var(--line); border-radius: 16px; overflow: hidden"><div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 10px 14px; font-size: 12px; color: var(--ink-muted)"><span>الحلاق</span><span>زيارات</span><span>الإيراد (ر.س)</span><span>متوسط المدة</span></div><div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 12px 14px; font-size: 14px; border-top: 1px solid var(--line)"><span>خالد</span><span>12</span><span>610</span><span>34 د</span></div><div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 12px 14px; font-size: 14px; border-top: 1px solid var(--line)"><span>سعد</span><span>9</span><span>420</span><span>38 د</span></div><div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 12px 14px; font-size: 14px; border-top: 1px solid var(--line)"><span>ماجد</span><span>6</span><span>210</span><span>29 د</span></div></div></section><section style="display: flex; flex-direction: column; gap: 10px"><h2 style="margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 18px; line-height: 28px">المعلّقات</h2><x-import component-from-global-scope="Saloni.Banner" tone="warning" title="دفعتان بانتظار التأكيد">عند خالد: محمد (60 ر.س) وماجد (40 ر.س).</x-import><x-import component-from-global-scope="Saloni.Banner" tone="info" title="حساب جديد ينتظر الاعتماد">محمد العتيبي — سجّل قبل 10 دقائق.</x-import></section></main><x-import component-from-global-scope="Saloni.BottomNav" items="{{navManager}}" active="{{n1}}"></x-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const yes = true, no = false;
+    return {
+      yes, no,
+      n0: 0, n1: 1, n2: 2, n3: 3, n4: 4, n45: 45, n52: 52, n38: 38, n84: 84, n120: 120,
+      bookOpts: [{ value: 'queue', label: 'أقرب دور', icon: 'list-numbers' }, { value: 'hour', label: 'ساعة محددة', icon: 'clock' }],
+      postponeOpts: [{ value: '1', label: 'دور واحد' }, { value: '2', label: 'دوران' }, { value: '3', label: '3 أدوار' }],
+      periodOpts: [{ value: 'd', label: 'اليوم' }, { value: 'w', label: 'الأسبوع' }, { value: 'm', label: 'الشهر' }],
+      navCustomer: [{ icon: 'calendar-check', label: 'حجزي' }, { icon: 'storefront', label: 'الصالون' }, { icon: 'receipt', label: 'السجل' }, { icon: 'user', label: 'حسابي' }],
+      navStaff: [{ icon: 'list-numbers', label: 'طابوري' }, { icon: 'coins', label: 'الدفعات', badge: 2 }, { icon: 'coffee', label: 'استراحاتي' }, { icon: 'gear-six', label: 'المزيد' }],
+      navManager: [{ icon: 'list-numbers', label: 'الطوابير' }, { icon: 'chart-bar', label: 'التقارير' }, { icon: 'storefront', label: 'الصالون' }, { icon: 'gear-six', label: 'الإعدادات' }],
+      hairFeats: ['غسيل', 'تصفيف'], beardFeats: ['موس حار', 'زيت لحية'], kidFeats: ['حتى 12 سنة'], waxFeats: ['85 غ'], oilFeats: ['30 مل'],
+      days: [{ day: 'السبت', from: '10:00 ص', to: '11:00 م' }, { day: 'الأحد', from: '10:00 ص', to: '11:00 م' }, { day: 'الاثنين', from: '10:00 ص', to: '11:00 م' },
+        { day: 'الثلاثاء', from: '10:00 ص', to: '11:00 م' }, { day: 'الأربعاء', from: '10:00 ص', to: '11:00 م', today: true },
+        { day: 'الخميس', from: '4:00 م', to: '1:00 ص' }, { day: 'الجمعة', closed: true }],
+      impact: [{ name: 'فهد القحطاني', from: '10:40', to: '10:55', delta: 15 }, { name: 'عبدالله', from: '11:10', to: '11:45', delta: 35, notify: true },
+        { name: 'ريان', from: '10:50 م', to: '11:25 م', pastClosing: true }],
+      revSeries: [640, 910, 720, 1120, 860, 1010, 1240], accSeries: [12, 10, 9, 8, 8, 7, 7]
+    };
+  }
+}
+</script>
+</body>
+</html>

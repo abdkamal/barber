@@ -1,0 +1,219 @@
+{
+ "v": 3,
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-09-24T01:06:33Z"
+ },
+ "title": "صالوني — النموذج الأولي",
+ "launch": {
+  "view": "canvas"
+ },
+ "pages": [],
+ "boards": {
+  "Main.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 390,
+   "h": 844,
+   "title": "رمز الصالون",
+   "is_interactive": true
+  },
+  "C-About.dc.html": {
+   "x": 470,
+   "y": 0,
+   "w": 390,
+   "h": 2020,
+   "title": "حول الصالون",
+   "is_interactive": true
+  },
+  "C-Register.dc.html": {
+   "x": 940,
+   "y": 0,
+   "w": 390,
+   "h": 844,
+   "title": "إنشاء حساب",
+   "is_interactive": true
+  },
+  "C-Book.dc.html": {
+   "x": 1410,
+   "y": 0,
+   "w": 390,
+   "h": 1180,
+   "title": "احجز دورك",
+   "is_interactive": true
+  },
+  "C-Offer.dc.html": {
+   "x": 1880,
+   "y": 0,
+   "w": 390,
+   "h": 844,
+   "title": "أقرب وقت متاح",
+   "is_interactive": true
+  },
+  "C-Track.dc.html": {
+   "x": 2350,
+   "y": 0,
+   "w": 390,
+   "h": 844,
+   "title": "متابعة الحجز",
+   "is_interactive": true
+  },
+  "C-Called.dc.html": {
+   "x": 2820,
+   "y": 0,
+   "w": 390,
+   "h": 844,
+   "title": "اقترب دورك",
+   "is_interactive": true
+  },
+  "C-Stale.dc.html": {
+   "x": 3290,
+   "y": 0,
+   "w": 390,
+   "h": 844,
+   "title": "وقت تقديري",
+   "is_interactive": true
+  },
+  "C-Cancel.dc.html": {
+   "x": 3760,
+   "y": 0,
+   "w": 390,
+   "h": 844,
+   "title": "إلغاء الحجز",
+   "is_interactive": true
+  },
+  "S-Queue.dc.html": {
+   "x": 0,
+   "y": 2380,
+   "w": 390,
+   "h": 1120,
+   "title": "طابوري",
+   "is_interactive": true
+  },
+  "S-Late.dc.html": {
+   "x": 470,
+   "y": 2380,
+   "w": 390,
+   "h": 844,
+   "title": "زبون متأخر",
+   "is_interactive": true
+  },
+  "S-Edit.dc.html": {
+   "x": 940,
+   "y": 2380,
+   "w": 390,
+   "h": 844,
+   "title": "تعديل الخدمة",
+   "is_interactive": true
+  },
+  "S-Walkin.dc.html": {
+   "x": 1410,
+   "y": 2380,
+   "w": 390,
+   "h": 844,
+   "title": "زبون حاضر",
+   "is_interactive": true
+  },
+  "S-Offline.dc.html": {
+   "x": 1880,
+   "y": 2380,
+   "w": 390,
+   "h": 1000,
+   "title": "بدون اتصال",
+   "is_interactive": true
+  },
+  "S-Payments.dc.html": {
+   "x": 2350,
+   "y": 2380,
+   "w": 390,
+   "h": 844,
+   "title": "الدفعات",
+   "is_interactive": true
+  },
+  "S-Signup.dc.html": {
+   "x": 0,
+   "y": 3860,
+   "w": 390,
+   "h": 844,
+   "title": "تسجيل صالون",
+   "is_interactive": true
+  },
+  "M-Salon.dc.html": {
+   "x": 470,
+   "y": 3860,
+   "w": 390,
+   "h": 1280,
+   "title": "ملف الصالون",
+   "is_interactive": true
+  },
+  "M-Reports.dc.html": {
+   "x": 940,
+   "y": 3860,
+   "w": 390,
+   "h": 1180,
+   "title": "التقارير",
+   "is_interactive": true
+  },
+  "M-Settings.dc.html": {
+   "x": 1410,
+   "y": 3860,
+   "w": 390,
+   "h": 1000,
+   "title": "الإعدادات",
+   "is_interactive": true
+  }
+ },
+ "order": [
+  "Main.dc.html",
+  "C-About.dc.html",
+  "C-Register.dc.html",
+  "C-Book.dc.html",
+  "C-Offer.dc.html",
+  "C-Track.dc.html",
+  "C-Called.dc.html",
+  "C-Stale.dc.html",
+  "C-Cancel.dc.html",
+  "S-Queue.dc.html",
+  "S-Late.dc.html",
+  "S-Edit.dc.html",
+  "S-Walkin.dc.html",
+  "S-Offline.dc.html",
+  "S-Payments.dc.html",
+  "S-Signup.dc.html",
+  "M-Salon.dc.html",
+  "M-Reports.dc.html",
+  "M-Settings.dc.html"
+ ],
+ "notes": {
+  "t-customer": {
+   "x": 0,
+   "y": -240,
+   "text": "تطبيق الزبون",
+   "kind": "title1",
+   "maxW": 1800
+  },
+  "t-staff": {
+   "x": 0,
+   "y": 2140,
+   "text": "تطبيق الحلاق",
+   "kind": "title1",
+   "maxW": 1800
+  },
+  "t-manager": {
+   "x": 0,
+   "y": 3620,
+   "text": "المدير وصاحب الصالون",
+   "kind": "title1",
+   "maxW": 1800
+  }
+ },
+ "designSystems": [
+  {
+   "title": "صالوني",
+   "namespace": "saloni",
+   "artifact": "https://claude.ai/artifact/WGQaBmAoKyMTJEGt8wZsua",
+   "version": null,
+   "copiedAt": "2026-09-24T01:06:33Z"
+  }
+ ]
+}

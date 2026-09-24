@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>حول الصالون</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/saloni/tokens.css">
+<link rel="stylesheet" href="ds/saloni/components/bundle.css">
+<script src="ds/saloni/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=El+Messiri:wght@500;600;700&amp;family=IBM+Plex+Sans+Arabic:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap">
+<style>
+body{margin:0;background:#0e1726;font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;color:#eaf1f8}
+a{color:#8cc8e6}a:hover{color:#b3dcf0}
+</style>
+</helmet>
+<div dir="rtl" style="width: 390px; height: 2020px; box-sizing: border-box; background: var(--surface); color: var(--ink); font-family: var(--font-text); display: flex; flex-direction: column; position: relative; overflow: hidden">
+<div style="height: 180px; background: var(--surface-elevated); border-bottom: 1px solid var(--line); display: grid; place-items: center; color: var(--ink-subtle); position: relative">
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 6px"><x-import component-from-global-scope="Saloni.Icon" name="image" size="{{n45}}"></x-import><span style="font-size: 12px">[صور الصالون — حتى 6]</span></div>
+  <a href="Main.dc.html" aria-label="رجوع" style="position: absolute; top: 16px; right: 16px; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; background: var(--surface-raised); color: var(--ink); border: 1px solid var(--line)"><x-import component-from-global-scope="Saloni.Icon" name="caret-right"></x-import></a>
+</div>
+<main style="display: flex; flex-direction: column; gap: 22px; padding: 0 16px 24px; margin-top: -32px; position: relative">
+  <div style="display: flex; align-items: flex-end; gap: 12px">
+    <span style="width: 72px; height: 72px; border-radius: 18px; background: var(--primary); color: var(--on-primary); display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 32px; border: 4px solid var(--surface)">ر</span>
+    <div style="flex-grow: 1; padding-bottom: 4px">
+      <h1 style="margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 26px; line-height: 36px">صالون الراحة</h1>
+    </div>
+    <x-import component-from-global-scope="Saloni.StatusBadge" status="done" tone="success" label="مفتوح الآن"></x-import>
+  </div>
+  <p style="margin: 0; font-size: 15px; line-height: 26px; color: var(--ink-muted)">صالون رجالي في حي النرجس منذ 2015. ثلاثة حلاقين، وخدمة بلا انتظار عبر الحجز المسبق للدور.</p>
+  <x-import component-from-global-scope="Saloni.ContactBar" address="الرياض — حي النرجس، طريق أنس بن مالك" phone="+966 11 000 0000" whatsapp="+966 55 000 0000" maps="{{yes}}" instagram="@raha.salon"></x-import>
+  <section style="display: flex; flex-direction: column; gap: 10px"><h2 style="margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 18px; line-height: 28px">الخدمات</h2><x-import component-from-global-scope="Saloni.CatalogItem" kind="service" name="حلاقة شعر" price="40" minutes="{{n38}}" description="قص وتدريج حسب طلبك." features="{{hairFeats}}"></x-import><x-import component-from-global-scope="Saloni.CatalogItem" kind="service" name="شعر ولحية" price="60" minutes="{{n45}}" description="قص الشعر مع تهذيب اللحية وتحديدها." features="{{beardFeats}}"></x-import><x-import component-from-global-scope="Saloni.CatalogItem" kind="service" name="حلاقة أطفال" price="30" minutes="{{n38}}" description="قصة هادئة وسريعة." features="{{kidFeats}}"></x-import></section>
+  <section style="display: flex; flex-direction: column; gap: 10px"><h2 style="margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 18px; line-height: 28px">المنتجات</h2><x-import component-from-global-scope="Saloni.CatalogItem" kind="product" name="واكس تصفيف مطفي" price="45" description="ثبات متوسط بلمسة طبيعية." features="{{waxFeats}}"></x-import><x-import component-from-global-scope="Saloni.CatalogItem" kind="product" name="زيت لحية" price="55" description="يرطب ويليّن اللحية." features="{{oilFeats}}"></x-import></section>
+  <x-import component-from-global-scope="Saloni.HoursList" open-now="{{yes}}" days="{{days}}"></x-import>
+</main>
+<div style="padding: 12px 16px 20px; background: var(--surface); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px"><a href="C-Register.dc.html" class="dw-btn dw-btn-primary dw-btn-lg dw-btn-block" style="text-decoration: none; box-sizing: border-box"><span>سجّل واحجز دوري</span></a></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":2020}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const yes = true, no = false;
+    return {
+      yes, no,
+      n0: 0, n1: 1, n2: 2, n3: 3, n4: 4, n45: 45, n52: 52, n38: 38, n84: 84, n120: 120,
+      bookOpts: [{ value: 'queue', label: 'أقرب دور', icon: 'list-numbers' }, { value: 'hour', label: 'ساعة محددة', icon: 'clock' }],
+      postponeOpts: [{ value: '1', label: 'دور واحد' }, { value: '2', label: 'دوران' }, { value: '3', label: '3 أدوار' }],
+      periodOpts: [{ value: 'd', label: 'اليوم' }, { value: 'w', label: 'الأسبوع' }, { value: 'm', label: 'الشهر' }],
+      navCustomer: [{ icon: 'calendar-check', label: 'حجزي' }, { icon: 'storefront', label: 'الصالون' }, { icon: 'receipt', label: 'السجل' }, { icon: 'user', label: 'حسابي' }],
+      navStaff: [{ icon: 'list-numbers', label: 'طابوري' }, { icon: 'coins', label: 'الدفعات', badge: 2 }, { icon: 'coffee', label: 'استراحاتي' }, { icon: 'gear-six', label: 'المزيد' }],
+      navManager: [{ icon: 'list-numbers', label: 'الطوابير' }, { icon: 'chart-bar', label: 'التقارير' }, { icon: 'storefront', label: 'الصالون' }, { icon: 'gear-six', label: 'الإعدادات' }],
+      hairFeats: ['غسيل', 'تصفيف'], beardFeats: ['موس حار', 'زيت لحية'], kidFeats: ['حتى 12 سنة'], waxFeats: ['85 غ'], oilFeats: ['30 مل'],
+      days: [{ day: 'السبت', from: '10:00 ص', to: '11:00 م' }, { day: 'الأحد', from: '10:00 ص', to: '11:00 م' }, { day: 'الاثنين', from: '10:00 ص', to: '11:00 م' },
+        { day: 'الثلاثاء', from: '10:00 ص', to: '11:00 م' }, { day: 'الأربعاء', from: '10:00 ص', to: '11:00 م', today: true },
+        { day: 'الخميس', from: '4:00 م', to: '1:00 ص' }, { day: 'الجمعة', closed: true }],
+      impact: [{ name: 'فهد القحطاني', from: '10:40', to: '10:55', delta: 15 }, { name: 'عبدالله', from: '11:10', to: '11:45', delta: 35, notify: true },
+        { name: 'ريان', from: '10:50 م', to: '11:25 م', pastClosing: true }],
+      revSeries: [640, 910, 720, 1120, 860, 1010, 1240], accSeries: [12, 10, 9, 8, 8, 7, 7]
+    };
+  }
+}
+</script>
+</body>
+</html>
