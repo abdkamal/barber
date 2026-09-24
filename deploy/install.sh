@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Saloni — trial installer for a fresh Ubuntu VPS. Safe to run again (idempotent).
+# Saloni — trial installer for a fresh Ubuntu or Debian VPS. Safe to run again (idempotent).
 #
 #   sudo bash deploy/install.sh [BRANCH] [--domain api.example.com]
 #
@@ -29,11 +29,11 @@ done
 fail() { printf '\033[1;31m✘ %s\033[0m\n' "$*" >&2; exit 1; }
 
 # ---- 0. Basic checks -------------------------------------------------------------------------
-[ "$(uname -s)" = "Linux" ] || fail "هذا المثبّت يعمل على خادم Linux فقط (Ubuntu 22.04 أو 24.04)."
+[ "$(uname -s)" = "Linux" ] || fail "هذا المثبّت يعمل على خادم Linux فقط (Ubuntu 22.04/24.04 أو Debian 12/13)."
 [ "$(id -u)" -eq 0 ] || fail "شغّل المثبّت بصلاحية الجذر: sudo bash deploy/install.sh"
 
 apt_install() {
-  command -v apt-get >/dev/null 2>&1 || fail "لم أجد apt-get. استخدم Ubuntu 22.04 أو 24.04، أو ثبّت يدويًا: $*"
+  command -v apt-get >/dev/null 2>&1 || fail "لم أجد apt-get. استخدم Ubuntu 22.04/24.04 أو Debian 12/13، أو ثبّت يدويًا: $*"
   DEBIAN_FRONTEND=noninteractive apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" >/dev/null
 }
