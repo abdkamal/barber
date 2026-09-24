@@ -1,0 +1,12 @@
+<!-- @dsCard group="Reports" height=200 -->
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><title>StatTile</title></head>
+<body>
+<div id="root"></div>
+<script>
+  var S = window.Saloni, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div',{className:'pv pv-grid pv-wide'}, h(S.StatTile,{label:'الإيراد المؤكد اليوم',value:'1,240',unit:'ر.س',delta:'+12% عن الأحد الماضي',deltaTone:'success',series:[6,9,7,11,8,10,12]}), h(S.StatTile,{label:'بانتظار تأكيد الدفع',value:'3',unit:'زيارات',delta:'185 ر.س',deltaTone:'warning'}), h(S.StatTile,{label:'دقة الأوقات المتوقعة',value:'±7',unit:'د',series:[12,10,9,8,8,7,7]})));
+</script>
+</body>
+</html>

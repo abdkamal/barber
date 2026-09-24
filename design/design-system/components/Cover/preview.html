@@ -1,0 +1,56 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>صالوني</title>
+<style>
+  html, body { margin:0; height:100%; }
+  body { background:var(--surface); color:var(--ink); font-family:var(--font-display); overflow:hidden; }
+  .cover { position:relative; width:960px; height:288px; overflow:hidden; }
+  .art { position:absolute; top:0; left:0; width:480px; height:288px; overflow:hidden; }
+  .art svg { display:block; width:480px; height:288px; }
+  .deep { fill:var(--ink); }
+  .brand { fill:var(--primary); }
+  .steel { fill:var(--steel); }
+  .blk { rx:var(--radius-lg); }
+  .cut { fill:var(--surface); }
+  .called { fill:var(--warning); }
+  .words { position:absolute; right:var(--space-6); bottom:var(--space-6); max-width:440px; text-align:right; }
+  .name { margin:0; font-size:112px; line-height:.95; font-weight:600; color:var(--ink); }
+  .tag { margin:var(--space-2) 0 0; font-family:var(--font-text); font-size:14px; line-height:20px; color:var(--ink-muted); }
+</style>
+</head>
+<body>
+<div class="cover">
+<div class="art" aria-hidden="true">
+<svg viewBox="0 0 480 288" width="480" height="288">
+<!--
+  blocks      ink 152x216 bled off the left edge (the deep ground of the dark theme) · primary 152x284 bled off the top (the identity, tallest) · steel 144x152 (requested-hour / information); ≈ 40% of 960x288
+  arrangement three slabs of unequal height on one baseline (y=264, space-6 above the edge), space-4 gutters, mirrored to the left half because the name reads first on the right in RTL
+  pattern     a queue of discs, from "the turn is the product": radius-full discs of space-4 at a space-8 pitch cut into the slabs in surface; the first in line (right-most, RTL) is warning, the one warm colour, as "called" is in the UI
+  scales      sides in space-2 multiples; gutters space-4; disc pitch space-8, diameter space-4; slab corners radius-lg
+-->
+<rect class="deep blk" x="-24" y="48" width="152" height="216" rx="20"/>
+<rect class="brand blk" x="144" y="-20" width="152" height="284" rx="20"/>
+<rect class="steel blk" x="312" y="112" width="144" height="152" rx="20"/>
+<circle class="cut" cx="24" cy="200" r="8"/>
+<circle class="cut" cx="56" cy="200" r="8"/>
+<circle class="cut" cx="88" cy="200" r="8"/>
+<circle class="cut" cx="168" cy="200" r="8"/>
+<circle class="cut" cx="200" cy="200" r="8"/>
+<circle class="cut" cx="232" cy="200" r="8"/>
+<circle class="cut" cx="264" cy="200" r="8"/>
+<circle class="cut" cx="328" cy="200" r="8"/>
+<circle class="cut" cx="360" cy="200" r="8"/>
+<circle class="cut" cx="392" cy="200" r="8"/>
+<circle class="called" cx="424" cy="200" r="8"/>
+</svg>
+</div>
+<div class="words">
+<h1 class="name">صالوني</h1>
+<p class="tag">احجز دوري — وقتك محفوظ وأنت في مكانك.</p>
+</div>
+</div>
+</body>
+</html>

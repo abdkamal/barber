@@ -1,0 +1,12 @@
+<!-- @dsCard group="Status" height=150 -->
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><title>StatusBadge</title></head>
+<body>
+<div id="root"></div>
+<script>
+  var S = window.Saloni, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div',{className:'pv pv-row'}, ['waiting','called','in_service','done','postponed','no_show','cancelled','requested','offered','walk_in','pay_awaiting','pay_confirmed'].map(function(s){return h(S.StatusBadge,{key:s,status:s});})));
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+<!-- @dsCard group="Salon page" height=380 -->
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><title>CatalogItem</title></head>
+<body>
+<div id="root"></div>
+<script>
+  var S = window.Saloni, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div',{className:'pv'}, h(S.CatalogItem,{kind:'service',name:'شعر ولحية',price:60,minutes:45,description:'قص وتدريج مع تهذيب اللحية وتحديدها بالموس.',features:['غسيل','تصفيف']}), h(S.CatalogItem,{kind:'product',name:'واكس تصفيف مطفي',price:45,description:'ثبات متوسط بلمسة طبيعية.',features:['85 غ']})));
+</script>
+</body>
+</html>

@@ -1,0 +1,269 @@
+{
+ "v": 3,
+ "layout": "files",
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-09-24T00:47:00Z"
+ },
+ "title": "صالوني",
+ "namespace": "Saloni",
+ "libraries": [
+  {
+   "name": "react",
+   "version": "18"
+  },
+  {
+   "name": "react-dom",
+   "version": "18"
+  }
+ ],
+ "sections": {},
+ "groups": [
+  "Icons"
+ ],
+ "assetGroups": {
+  "Icons": {
+   "name": "Icons",
+   "tile": "s",
+   "order": [
+    "scissors.svg",
+    "clock.svg",
+    "hourglass-medium.svg",
+    "bell-ringing.svg",
+    "user.svg",
+    "users-three.svg",
+    "user-plus.svg",
+    "calendar-check.svg",
+    "check-circle.svg",
+    "x-circle.svg",
+    "warning.svg",
+    "info.svg",
+    "coins.svg",
+    "receipt.svg",
+    "chart-bar.svg",
+    "wifi-slash.svg",
+    "coffee.svg",
+    "storefront.svg",
+    "map-pin.svg",
+    "whatsapp-logo.svg",
+    "phone.svg",
+    "package.svg",
+    "qr-code.svg",
+    "lock-simple.svg",
+    "eye.svg",
+    "eye-slash.svg",
+    "gear-six.svg",
+    "plus.svg",
+    "clock-counter-clockwise.svg",
+    "arrow-u-up-left.svg",
+    "caret-left.svg",
+    "caret-right.svg"
+   ],
+   "files": {
+    "scissors.svg": {
+     "name": "scissors.svg",
+     "blob": "8adb75347df4ae9be5eec2e195953461",
+     "size": 501,
+     "type": "image/svg+xml"
+    },
+    "clock.svg": {
+     "name": "clock.svg",
+     "blob": "6fa19ce2b43c2130cbac42355423ae83",
+     "size": 282,
+     "type": "image/svg+xml"
+    },
+    "hourglass-medium.svg": {
+     "name": "hourglass-medium.svg",
+     "blob": "2ef69b584230e4ddb5c88aa3f5aef849",
+     "size": 468,
+     "type": "image/svg+xml"
+    },
+    "bell-ringing.svg": {
+     "name": "bell-ringing.svg",
+     "blob": "b1ae9b7a0b968be9c20f56d8f7c66124",
+     "size": 651,
+     "type": "image/svg+xml"
+    },
+    "user.svg": {
+     "name": "user.svg",
+     "blob": "4825659b4d4ba7105f50a6dd0c865655",
+     "size": 335,
+     "type": "image/svg+xml"
+    },
+    "users-three.svg": {
+     "name": "users-three.svg",
+     "blob": "71fa2342d1a302579bfebcabbb8c33dc",
+     "size": 684,
+     "type": "image/svg+xml"
+    },
+    "user-plus.svg": {
+     "name": "user-plus.svg",
+     "blob": "e77d0142f8ae9e4be4d8ea068341103c",
+     "size": 472,
+     "type": "image/svg+xml"
+    },
+    "calendar-check.svg": {
+     "name": "calendar-check.svg",
+     "blob": "53d52f91eb7b2d527fdbd6e0171ae2a2",
+     "size": 455,
+     "type": "image/svg+xml"
+    },
+    "check-circle.svg": {
+     "name": "check-circle.svg",
+     "blob": "803f920bfe286e02c91881ba7bf3d79f",
+     "size": 334,
+     "type": "image/svg+xml"
+    },
+    "x-circle.svg": {
+     "name": "x-circle.svg",
+     "blob": "2595a0b81942a28a37950b55843ade30",
+     "size": 399,
+     "type": "image/svg+xml"
+    },
+    "warning.svg": {
+     "name": "warning.svg",
+     "blob": "c3ae734cca3cd9aba54eb6867acdfc6b",
+     "size": 538,
+     "type": "image/svg+xml"
+    },
+    "info.svg": {
+     "name": "info.svg",
+     "blob": "dea548e7e18704ab76540e41ea4614b6",
+     "size": 343,
+     "type": "image/svg+xml"
+    },
+    "coins.svg": {
+     "name": "coins.svg",
+     "blob": "2d49408dfa11f408f5222e5cd975e2ac",
+     "size": 1065,
+     "type": "image/svg+xml"
+    },
+    "receipt.svg": {
+     "name": "receipt.svg",
+     "blob": "bcdaa47016e2ce0a8f48244502e562b9",
+     "size": 532,
+     "type": "image/svg+xml"
+    },
+    "chart-bar.svg": {
+     "name": "chart-bar.svg",
+     "blob": "a760bb043e22964340f9ac462eaccb37",
+     "size": 277,
+     "type": "image/svg+xml"
+    },
+    "wifi-slash.svg": {
+     "name": "wifi-slash.svg",
+     "blob": "1f08dfa1d7cbc2ea2b1ea8561ff04d32",
+     "size": 781,
+     "type": "image/svg+xml"
+    },
+    "coffee.svg": {
+     "name": "coffee.svg",
+     "blob": "4f64416a603daebcb9e197d1f31cb835",
+     "size": 571,
+     "type": "image/svg+xml"
+    },
+    "storefront.svg": {
+     "name": "storefront.svg",
+     "blob": "5e6cbf1bba71bdcffe9c1643d87002c5",
+     "size": 653,
+     "type": "image/svg+xml"
+    },
+    "map-pin.svg": {
+     "name": "map-pin.svg",
+     "blob": "a8f2df1d2edc60e9b15b981bf06b1d0c",
+     "size": 454,
+     "type": "image/svg+xml"
+    },
+    "whatsapp-logo.svg": {
+     "name": "whatsapp-logo.svg",
+     "blob": "fe71a6c1dbd54a1bd02a34003d38ab15",
+     "size": 698,
+     "type": "image/svg+xml"
+    },
+    "phone.svg": {
+     "name": "phone.svg",
+     "blob": "9ca5f2a2be1960e9539e18b331f98dd7",
+     "size": 704,
+     "type": "image/svg+xml"
+    },
+    "package.svg": {
+     "name": "package.svg",
+     "blob": "70881286c6a8bc38be1440485e56e1a4",
+     "size": 481,
+     "type": "image/svg+xml"
+    },
+    "qr-code.svg": {
+     "name": "qr-code.svg",
+     "blob": "2a77fec5e2f55ed6dc2afe3603db4734",
+     "size": 625,
+     "type": "image/svg+xml"
+    },
+    "lock-simple.svg": {
+     "name": "lock-simple.svg",
+     "blob": "a3d9d1283aceb5d0eddcab8e1bb7d1f1",
+     "size": 270,
+     "type": "image/svg+xml"
+    },
+    "eye.svg": {
+     "name": "eye.svg",
+     "blob": "82cac8e343b5c529d360b4b1548df03d",
+     "size": 696,
+     "type": "image/svg+xml"
+    },
+    "eye-slash.svg": {
+     "name": "eye-slash.svg",
+     "blob": "1fcfd7d8e59a3a595d8b9fd85f6422fd",
+     "size": 995,
+     "type": "image/svg+xml"
+    },
+    "gear-six.svg": {
+     "name": "gear-six.svg",
+     "blob": "b31ffe4e41427cf1270d8a656df98a40",
+     "size": 1457,
+     "type": "image/svg+xml"
+    },
+    "plus.svg": {
+     "name": "plus.svg",
+     "blob": "b135d29649d40c3f6b8c40c15887bdcb",
+     "size": 207,
+     "type": "image/svg+xml"
+    },
+    "clock-counter-clockwise.svg": {
+     "name": "clock-counter-clockwise.svg",
+     "blob": "120deea55b87aad7c630cd0981a68fc5",
+     "size": 404,
+     "type": "image/svg+xml"
+    },
+    "arrow-u-up-left.svg": {
+     "name": "arrow-u-up-left.svg",
+     "blob": "5c59a59d2ed931dd9d5e933635ae981a",
+     "size": 298,
+     "type": "image/svg+xml"
+    },
+    "caret-left.svg": {
+     "name": "caret-left.svg",
+     "blob": "bc1206dc44a0e86540792a83c0b91869",
+     "size": 195,
+     "type": "image/svg+xml"
+    },
+    "caret-right.svg": {
+     "name": "caret-right.svg",
+     "blob": "f553fc722cbc4ddf92de1f6e8cb40f63",
+     "size": 214,
+     "type": "image/svg+xml"
+    }
+   }
+  }
+ },
+ "blobs": {},
+ "docs": {
+  "readme": "project/README.md",
+  "sections": []
+ },
+ "lastChange": {
+  "by": "Claude",
+  "at": "2026-09-24T00:47:00Z",
+  "via": "Claude Code",
+  "note": "نظام التصميم الأول لصالوني: الألوان، الخطوط، المسافات، 22 مكوّنًا، الأيقونات"
+ }
+}

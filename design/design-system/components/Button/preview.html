@@ -1,0 +1,15 @@
+<!-- @dsCard group="Actions" height=180 -->
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><title>Button</title></head>
+<body>
+<div id="root"></div>
+<script>
+  var S = window.Saloni, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div',{className:'pv'},
+ h('div',{className:'pv-row'}, h(S.Button,{icon:'scissors'},'بدء الخدمة'), h(S.Button,{variant:'secondary'},'تأجيل دور'), h(S.Button,{variant:'ghost'},'تعديل الخدمة')),
+ h('div',{className:'pv-row'}, h(S.Button,{variant:'danger',size:'sm'},'لم يحضر'), h(S.Button,{loading:true},'جارٍ الحجز'), h(S.Button,{disabled:true},'الحجز متوقف')),
+ h(S.Button,{size:'lg',block:true,icon:'coins'},'تأكيد استلام الدفع')));
+</script>
+</body>
+</html>
