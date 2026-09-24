@@ -64,7 +64,8 @@ describe('salon self-registration (ق37)', () => {
       await admin.query(`CREATE DATABASE "${dbName}"`);
       const res = await ctx.http().post('/v1/salons/register').send(body({ name: 'Rollback Test' }, { username: 'rb_owner' }));
       expect(res.status).toBe(500);
-      expect(res.body.error.code).toBe('INTERNAL_ERROR');
+      expect(res.body.error.code).toBe('INTERNAL');
+      expect(res.body.error.requestId).toBe(res.headers['x-request-id']);
       expect((await ctx.vendor.list()).find((s) => s.code === 'ROLL-10')).toBeUndefined();
       const { rowCount } = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
       expect(rowCount).toBe(1);

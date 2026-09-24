@@ -13,6 +13,7 @@ import '../../data/models.dart';
 import '../../state/app_services.dart';
 import '../common/first_run.dart';
 import '../common/ui.dart';
+import '../manager/manager_barber.dart';
 import 'closing_sheet.dart';
 import 'edit_services_sheet.dart';
 import 'late_sheet.dart';
@@ -172,6 +173,25 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     });
   }
 
+  /// المدير الذي يحلق: ينسخ دوام الصالون إلى دوامه الخاص ثم يحدّث «طابوري».
+  Future<void> _adoptSalonHours() async {
+    final api = ref.read(servicesProvider).api;
+    try {
+      final me = (await api.getSessionInfo()).accountId;
+      final added = await adoptSalonHours(api, me);
+      await ref.read(barberRepoProvider).refresh();
+      if (!mounted) return;
+      toast(
+        context,
+        added > 0
+            ? 'صار لك دوام الصالون — يُحجز عندك وتُنقل إليك الحجوزات'
+            : 'لا دوام للصالون لنسخه — اضبط دوامك من «الإعدادات ← الدوام»',
+      );
+    } catch (e, st) {
+      if (mounted) toast(context, errorText(e, st));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(barberRepoProvider);
@@ -271,11 +291,26 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       ));
     }
     if (repo.noShiftToday && !repo.absentToday) {
-      children.add(const SaloniBanner(
-        tone: SaloniBannerTone.info,
-        title: 'لا دوام لك اليوم',
-        body: 'لا يُحجز عندك اليوم وفق جدول الدوام. راجع المدير إن كان هذا غير صحيح.',
-      ));
+      children.add(auth.isManager
+          // المدير الذي يحلق: دوام الصالون لا يسري عليه — نقرة واحدة تجعله يستقبل الحجز.
+          ? SaloniBanner(
+              key: const Key('manager-no-shift'),
+              tone: SaloniBannerTone.info,
+              title: ManagerAsBarber.noShiftTitle,
+              body: ManagerAsBarber.noShiftBody,
+              action: SaloniButton(
+                key: const Key('adopt-salon-hours'),
+                label: ManagerAsBarber.adoptLabel,
+                size: SaloniButtonSize.sm,
+                variant: SaloniButtonVariant.secondary,
+                onPressed: _adoptSalonHours,
+              ),
+            )
+          : const SaloniBanner(
+              tone: SaloniBannerTone.info,
+              title: 'لا دوام لك اليوم',
+              body: 'لا يُحجز عندك اليوم وفق جدول الدوام. راجع المدير إن كان هذا غير صحيح.',
+            ));
     }
     if (repo.absentToday) {
       children.add(SaloniBanner(

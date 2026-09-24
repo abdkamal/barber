@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:saloni_ui/saloni_ui.dart';
 
+import '../../core/config.dart';
 import '../../core/format.dart';
 import '../../state/app_services.dart';
 import '../common/first_run.dart';
@@ -90,6 +91,12 @@ class AppPreferencesSection extends ConsumerWidget {
               label: 'الجولة التعريفية',
               value: 'عرض',
               onTap: () => showOnboarding(context, auth.isManager ? 'manager' : 'barber'),
+            ),
+            ValueRow(
+              key: const Key('open-about'),
+              label: 'عن التطبيق',
+              value: 'الإصدار ${AppConfig.appVersion}',
+              onTap: () => context.push('/about'),
             ),
           ]),
           SaloniButton(

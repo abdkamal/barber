@@ -30,6 +30,8 @@ dependencies:
   geolocator: ^13.0.2
   image_picker: ^1.1.2
   qr_flutter: ^4.1.0
+  # «عن التطبيق»: الاتصال بالمطوّر (tel:) — الإصدار نفسه في تطبيق الزبون.
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

@@ -69,8 +69,8 @@ class _EditServicesSheetState extends State<EditServicesSheet> {
           for (final i in p.pastClosing) ClosingChoice(i.bookingId, i.name, i.to),
         ];
       });
-    } catch (e) {
-      if (mounted && id == _requestId) setState(() => _previewError = errorText(e));
+    } catch (e, st) {
+      if (mounted && id == _requestId) setState(() => _previewError = errorText(e, st));
     } finally {
       if (mounted && id == _requestId) setState(() => _loading = false);
     }

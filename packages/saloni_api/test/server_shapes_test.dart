@@ -517,13 +517,13 @@ void main() {
       routes['GET /v1/staff/payments'] =
           (_) => jsonResponse({'error': {'code': 'UNAUTHENTICATED', 'message': 'x'}}, 401);
       routes['POST /v1/auth/refresh'] =
-          (_) => jsonResponse({'error': {'code': 'INTERNAL_ERROR', 'message': 'x'}}, 500);
+          (_) => jsonResponse({'error': {'code': 'INTERNAL', 'message': 'x'}}, 500);
       final c = client();
       await c.setSession(Session.fromJson(sessionJson()), rememberMe: false);
       var signedOut = 0;
       c.onSignedOut.listen((_) => signedOut++);
       await expectLater(c.getStaffPayments(),
-          throwsA(isA<ApiError>().having((e) => e.code, 'code', 'INTERNAL_ERROR')));
+          throwsA(isA<ApiError>().having((e) => e.code, 'code', 'INTERNAL')));
       await Future<void>.delayed(Duration.zero);
       expect(signedOut, 0);
     });

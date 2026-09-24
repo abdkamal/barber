@@ -1,4 +1,5 @@
 import 'package:saloni_api/saloni_api.dart' as sa;
+import '../core/error_texts.dart';
 
 /// بيانات الصالون كما يعيدها السيرفر مع الجلسة.
 class SalonMeta {
@@ -322,13 +323,8 @@ class RejectedEvent {
     sa.DeviceEventType.absentCancelled: 'التراجع عن «لن أعمل اليوم»',
   };
 
-  /// أسباب رفض معروفة بنص عربي بدل الرمز.
-  static const _reasons = {
-    'BARBER_ABSENT': 'أنت مسجّل «لن أعمل اليوم»',
-    'ABSENCE_SET_BY_MANAGER': 'سجّل المدير غيابك اليوم؛ التراجع عنه من المدير',
-    'BREAK_ALREADY_OPEN': 'لديك استراحة مفتوحة',
-    'NOT_WORKING': 'لا دوام لك الآن',
-  };
+  /// أسباب رفض معروفة بنص عربي بدل الرمز (كل أسباب `sync.service.ts`).
+  static const _reasons = ErrorTexts.syncReasons;
 
   /// رسالة عربية واضحة تُعرض للحلاق: ماذا رُفض ولماذا.
   String get arabicMessage {

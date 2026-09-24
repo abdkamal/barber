@@ -99,8 +99,8 @@ class _ManagerSettingsScreenState extends ConsumerState<ManagerSettingsScreen> {
     try {
       final s = await ref.read(servicesProvider).api.updateManagerSettings(body);
       if (mounted) setState(() => _settings = s);
-    } catch (e) {
-      if (mounted) toast(context, errorText(e));
+    } catch (e, st) {
+      if (mounted) toast(context, errorText(e, st));
     }
   }
 

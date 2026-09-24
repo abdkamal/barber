@@ -86,8 +86,8 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
                     'role': role,
                   });
                   if (ctx.mounted) Navigator.of(ctx).pop();
-                } catch (e) {
-                  setState(() => error = errorText(e));
+                } catch (e, st) {
+                  setState(() => error = errorText(e, st));
                 }
               },
             ),
@@ -182,8 +182,8 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
         });
         _reload();
       }
-    } catch (e) {
-      if (mounted) toast(context, errorText(e));
+    } catch (e, st) {
+      if (mounted) toast(context, errorText(e, st));
     }
   }
 

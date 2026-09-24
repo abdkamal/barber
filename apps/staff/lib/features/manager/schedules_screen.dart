@@ -64,8 +64,8 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
       await f();
       if (done != null && mounted) toast(context, done);
       _reload();
-    } catch (e) {
-      if (mounted) toast(context, errorText(e));
+    } catch (e, st) {
+      if (mounted) toast(context, errorText(e, st));
     }
   }
 

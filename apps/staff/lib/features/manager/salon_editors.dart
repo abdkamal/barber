@@ -100,8 +100,8 @@ class _CatalogEditorState extends ConsumerState<_CatalogEditor> {
             bytes: photo.bytes, filename: photo.name, contentType: photo.type);
       }
       if (mounted) Navigator.of(context).pop(true);
-    } catch (e) {
-      if (mounted) setState(() => _error = errorText(e));
+    } catch (e, st) {
+      if (mounted) setState(() => _error = errorText(e, st));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -114,8 +114,8 @@ class _CatalogEditorState extends ConsumerState<_CatalogEditor> {
     try {
       await ref.read(servicesProvider).api.deleteManagerCatalogItem(str(widget.item, ['id']));
       if (mounted) Navigator.of(context).pop(true);
-    } catch (e) {
-      if (mounted) setState(() => _error = errorText(e));
+    } catch (e, st) {
+      if (mounted) setState(() => _error = errorText(e, st));
     }
   }
 
@@ -300,8 +300,8 @@ Future<bool> editService(
       await api.updateManagerService(str(service, ['id']), body);
     }
     return true;
-  } catch (e) {
-    if (context.mounted) toast(context, errorText(e));
+  } catch (e, st) {
+    if (context.mounted) toast(context, errorText(e, st));
     return false;
   }
 }

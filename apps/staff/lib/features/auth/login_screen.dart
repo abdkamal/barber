@@ -58,8 +58,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             password: _pass.text,
             rememberMe: _remember,
           );
-    } catch (e) {
-      if (mounted) setState(() => _error = errorText(e));
+    } catch (e, st) {
+      if (mounted) setState(() => _error = errorText(e, st));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

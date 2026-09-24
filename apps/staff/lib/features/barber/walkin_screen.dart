@@ -61,8 +61,8 @@ class _WalkInScreenState extends ConsumerState<WalkInScreen> {
     });
     try {
       await repo.ensureServices();
-    } catch (e) {
-      if (mounted) setState(() => _servicesLoadError = errorText(e));
+    } catch (e, st) {
+      if (mounted) setState(() => _servicesLoadError = errorText(e, st));
     } finally {
       if (mounted) setState(() => _loadingServices = false);
     }
@@ -94,8 +94,8 @@ class _WalkInScreenState extends ConsumerState<WalkInScreen> {
       if (!mounted) return;
       toast(context, 'أُضيف ${_name.text.trim()} إلى آخر طابورك');
       context.canPop() ? context.pop() : context.go('/b/queue');
-    } catch (e) {
-      if (mounted) setState(() => _error = errorText(e));
+    } catch (e, st) {
+      if (mounted) setState(() => _error = errorText(e, st));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

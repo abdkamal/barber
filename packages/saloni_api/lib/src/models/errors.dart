@@ -10,6 +10,7 @@ class ApiError implements Exception {
     this.statusCode,
     this.retryAfter,
     this.details,
+    this.requestId,
   });
 
   /// رمز الخطأ الثابت من السيرفر (مثلاً `SLOT_UNAVAILABLE`).
@@ -27,6 +28,55 @@ class ApiError implements Exception {
   /// تفاصيل إضافية يرسلها السيرفر مع بعض الأخطاء (مثل عرض أقرب وقت عند
   /// تعذّر تعديل الوقت، أو البدائل عند تعذّر النقل)، كما وردت.
   final Object? details;
+
+  /// معرّف الطلب من السيرفر (ترويسة `X-Request-Id`، أو `error.requestId` في
+  /// ردود 500) — يطابق سطر سجل السيرفر؛ يُعرض مختصرًا ليبلّغ به المستخدم.
+  final String? requestId;
+
+  /// آخر 6 محارف من [requestId] (للعرض: «رمز: …»)، أو `null`.
+  String? get shortRequestId {
+    final id = requestId;
+    if (id == null || id.isEmpty) return null;
+    final clean = id.replaceAll('-', '');
+    return clean.length <= 6 ? clean : clean.substring(clean.length - 6);
+  }
+
+  /// `400 VALIDATION_FAILED`: الحقول المرفوضة `[{path, code}]` كما أرسلها
+  /// السيرفر (المسار ورمز المشكلة فقط، بلا قيم).
+  List<ValidationIssue> get validationIssues {
+    final d = details;
+    if (d is! List) return const [];
+    return [
+      for (final e in d)
+        if (e is Map)
+          ValidationIssue(
+            path: '${e['path'] ?? ''}',
+            code: '${e['code'] ?? ''}',
+          ),
+    ];
+  }
+
+  /// نوع فشل الشبكة (لم يصل رد من السيرفر): لا إنترنت، أو السيرفر لا يُصل،
+  /// أو انتهت المهلة. `null` إن لم يكن خطأ شبكة.
+  NetworkFailure? get networkFailure {
+    if (code == 'TIMEOUT') return NetworkFailure.timeout;
+    if (code != 'NETWORK_ERROR') return null;
+    final m = message.toLowerCase();
+    const noInternet = [
+      'failed host lookup',
+      'network is unreachable',
+      'no address associated',
+      'nodename nor servname',
+      'enetunreach',
+      'no route to host',
+      'errno = 7',
+      'errno = 101',
+      'software caused connection abort',
+    ];
+    if (noInternet.any(m.contains)) return NetworkFailure.noInternet;
+    if (m.contains('timed out')) return NetworkFailure.timeout;
+    return NetworkFailure.serverUnreachable;
+  }
 
   /// رموز الأخطاء المحلية التي لا تعني رفضًا من السيرفر — يمكن إعادة المحاولة.
   static const networkCodes = {'NETWORK_ERROR', 'TIMEOUT'};
@@ -77,20 +127,26 @@ class ApiError implements Exception {
     ];
   }
 
-  factory ApiError.fromJson(Map<String, dynamic> json, {int? statusCode}) {
+  factory ApiError.fromJson(Map<String, dynamic> json,
+      {int? statusCode, String? requestId}) {
     final error = json['error'];
     if (error is Map) {
+      final code = error['code'];
+      final message = error['message'];
+      final bodyId = error['requestId'];
       return ApiError(
-        code: error['code'] as String? ?? 'UNKNOWN',
-        message: error['message'] as String? ?? 'حدث خطأ غير متوقع',
+        code: code is String ? code : 'UNKNOWN',
+        message: message is String ? message : 'حدث خطأ غير متوقع',
         statusCode: statusCode,
         details: error['details'],
+        requestId: bodyId is String ? bodyId : requestId,
       );
     }
     return ApiError(
       code: 'UNKNOWN',
       message: 'حدث خطأ غير متوقع',
       statusCode: statusCode,
+      requestId: requestId,
     );
   }
 
@@ -114,7 +170,32 @@ class ApiError implements Exception {
       );
 
   @override
-  String toString() => 'ApiError($code: $message)';
+  String toString() => 'ApiError($code: $message'
+      '${statusCode == null ? '' : ', http $statusCode'}'
+      '${requestId == null ? '' : ', request $requestId'})';
+}
+
+/// حقل رفضه تحقق السيرفر (`VALIDATION_FAILED`): المسار (`salon.timezone`،
+/// `owner.username`…) ورمز المشكلة (`invalid_timezone`، `too_small`…).
+class ValidationIssue {
+  const ValidationIssue({required this.path, required this.code});
+  final String path;
+  final String code;
+
+  @override
+  String toString() => '$path:$code';
+}
+
+/// أنواع فشل الاتصال (لم يصل رد من السيرفر).
+enum NetworkFailure {
+  /// لا اتصال بالإنترنت (تعذّر حلّ الاسم، الشبكة غير متاحة).
+  noInternet,
+
+  /// الإنترنت متاح لكن السيرفر لا يُصل (رُفض الاتصال، قُطع، شهادة…).
+  serverUnreachable,
+
+  /// انتهت مهلة الاتصال.
+  timeout,
 }
 
 /// بديل مقترح عند تعذّر النقل: `{barberId, barberName, start, end}`.

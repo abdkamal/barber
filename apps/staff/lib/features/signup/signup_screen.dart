@@ -95,8 +95,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     switch (_step) {
       case 0:
         if (_ownerName.text.trim().isEmpty) return 'أدخل اسمك';
-        if (!RegExp(r'^[a-zA-Z0-9._-]{3,32}$').hasMatch(_username.text.trim())) {
-          return 'اسم المستخدم: 3–32 حرفًا لاتينيًا أو أرقامًا';
+        // يطابق السيرفر (`USERNAME_RE`): يبدأ بحرف لاتيني أو رقم (كان «_ali» يمر هنا
+        // ويرفضه السيرفر برسالة عامة).
+        if (!RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{2,31}$').hasMatch(digits(_username.text.trim()))) {
+          return 'اسم المستخدم: 3–32 من الحروف اللاتينية أو الأرقام أو . _ - ويبدأ بحرف أو رقم';
         }
         if (_pass.text.length < 10) return 'كلمة المرور 10 أحرف على الأقل';
         if (_pass.text != _pass2.text) return 'كلمتا المرور غير متطابقتين';
@@ -137,7 +139,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         },
         owner: {
           'name': _ownerName.text.trim(),
-          'username': _username.text.trim(),
+          'username': digits(_username.text.trim()),
           'password': _pass.text,
         },
       );
@@ -171,8 +173,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         _step = 4;
         _error = null;
       });
-    } catch (e) {
-      setState(() => _error = errorText(e));
+    } catch (e, st) {
+      setState(() => _error = errorText(e, st));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

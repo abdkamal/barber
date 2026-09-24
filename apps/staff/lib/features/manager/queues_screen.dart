@@ -10,6 +10,7 @@ import '../../core/format.dart';
 import '../../state/app_services.dart';
 import '../barber/queue_screen.dart' show uiStatus;
 import '../common/ui.dart';
+import 'manager_barber.dart';
 import 'manager_common.dart';
 
 /// طوابير كل الحلاقين + النقل اليدوي (ق25: للمدير فقط).
@@ -22,6 +23,9 @@ class QueuesScreen extends ConsumerStatefulWidget {
 
 class _QueuesScreenState extends ConsumerState<QueuesScreen> {
   List<sa.ManagerBarberQueue>? _barbers;
+
+  /// كل الطاقم (لإظهار من لا دوام له في ورقة النقل مع السبب).
+  List<Map<String, dynamic>> _staff = const [];
   Object? _error;
   Timer? _timer;
 
@@ -40,10 +44,18 @@ class _QueuesScreenState extends ConsumerState<QueuesScreen> {
 
   Future<void> _load() async {
     try {
-      final queues = await ref.read(servicesProvider).api.getManagerQueues();
+      final api = ref.read(servicesProvider).api;
+      final queues = await api.getManagerQueues();
+      List<Map<String, dynamic>>? staff;
+      try {
+        staff = listOf(await api.getManagerStaff());
+      } catch (e, st) {
+        debugPrint('[saloni] staff list failed: $e\n$st');
+      }
       if (!mounted) return;
       setState(() {
         _barbers = queues.barbers;
+        if (staff != null) _staff = staff;
         _error = null;
       });
     } catch (e) {
@@ -58,8 +70,14 @@ class _QueuesScreenState extends ConsumerState<QueuesScreen> {
     ];
     final done = await showSaloniSheet<bool>(
       context,
-      (ctx) => TransferSheet(booking: booking, from: from, targets: others),
+      (ctx) => TransferSheet(
+        booking: booking,
+        from: from,
+        targets: others,
+        idle: idleStaff(_staff, _barbers ?? const [], exclude: from.id),
+      ),
     );
+    if (done != true) await _load();
     if (done == true) {
       if (mounted) toast(context, 'نُقل الحجز وأُبلغ الزبون');
       await _load();
@@ -88,8 +106,8 @@ class _QueuesScreenState extends ConsumerState<QueuesScreen> {
         await api.deleteManagerAbsence(match.first['id'] as String);
         if (mounted) toast(context, 'عاد ${barber.name} للعمل اليوم — استُؤنف الحجز عنده');
       }
-    } catch (e) {
-      if (mounted) toast(context, 'تعذّر إلغاء الغياب: ${errorText(e)}');
+    } catch (e, st) {
+      if (mounted) toast(context, 'تعذّر إلغاء الغياب: ${errorText(e, st)}');
     }
     await _load();
   }
@@ -132,11 +150,28 @@ class _QueuesScreenState extends ConsumerState<QueuesScreen> {
                 body: 'أضف الطاقم من الإعدادات ← الطاقم.',
               ),
             for (final b in barbers ?? const <sa.ManagerBarberQueue>[]) _BarberQueue(barber: b, onTransfer: _transfer, onUndoAbsence: _undoAbsence),
+            if (barbers != null) ..._idleNote(idleStaff(_staff, barbers)),
           ]),
         ),
       ],
     );
   }
+}
+
+/// من لا يظهر في الطوابير لأنه بلا دوام اليوم — بدل أن يختفي بلا تفسير.
+List<Widget> _idleNote(List<Map<String, dynamic>> idle) {
+  if (idle.isEmpty) return const [];
+  final names = idle
+      .map((s) => str(s, ['role']) == 'manager' ? '${str(s, ['name'])} (مدير)' : str(s, ['name']))
+      .join('، ');
+  final hasManager = idle.any((s) => str(s, ['role']) == 'manager');
+  return [
+    Muted(
+      'بلا دوام اليوم (لا يُحجز عندهم ولا يُنقل إليهم): $names.'
+      '${hasManager ? ' دوام الصالون لا يسري على المديرين — من يحلق منهم يعمل بدوام الصالون من «طابوري» أو يُضبط دوامه من «الدوام».' : ''}',
+      key: const Key('idle-staff-note'),
+    ),
+  ];
 }
 
 class _BarberQueue extends StatelessWidget {
@@ -202,10 +237,20 @@ class _BarberQueue extends StatelessWidget {
 
 /// ورقة النقل اليدوي (ق25).
 class TransferSheet extends ConsumerStatefulWidget {
-  const TransferSheet({super.key, required this.booking, required this.from, required this.targets});
+  const TransferSheet({
+    super.key,
+    required this.booking,
+    required this.from,
+    required this.targets,
+    this.idle = const [],
+  });
   final sa.Booking booking;
   final sa.ManagerBarberQueue from;
   final List<sa.ManagerBarberQueue> targets;
+
+  /// طاقم نشط بلا دوام اليوم (لا يظهر في `GET /manager/queues`) — يُعرض غير
+  /// متاح مع السبب؛ والمدير منهم يمكن منحه دوام الصالون بنقرة (المرحلة 11).
+  final List<Map<String, dynamic>> idle;
 
   @override
   ConsumerState<TransferSheet> createState() => _TransferSheetState();
@@ -215,6 +260,32 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
   String? _to;
   bool _busy = false;
   String? _error;
+  late List<sa.ManagerBarberQueue> _targets = widget.targets;
+  late List<Map<String, dynamic>> _idle = widget.idle;
+
+  /// يمنح مديرًا دوام الصالون ثم يعيد قراءة الطوابير فيصبح هدفًا للنقل.
+  Future<void> _adopt(Map<String, dynamic> s) async {
+    final id = str(s, ['id']);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final api = ref.read(servicesProvider).api;
+      final added = await adoptSalonHours(api, id);
+      final queues = await api.getManagerQueues();
+      if (!mounted) return;
+      setState(() {
+        _targets = [for (final b in queues.barbers) if (b.id != widget.from.id) b];
+        _idle = [for (final x in _idle) if (!_targets.any((t) => t.id == str(x, ['id']))) x];
+        if (added == 0) _error = 'لا دوام للصالون لنسخه — اضبط الدوام من «الإعدادات ← الدوام»';
+      });
+    } catch (e, st) {
+      if (mounted) setState(() => _error = errorText(e, st));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
   late final String _key = ref.read(servicesProvider).api.newIdempotencyKey();
 
   Future<void> _submit() async {
@@ -236,8 +307,8 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
           ? ''
           : '\nمتاح عند: ${alt.map((a) => '${a.barberName} ${timeAr(a.start.toLocal())}').join('، ')}';
       if (mounted) setState(() => _error = '${errorText(e)}$hint');
-    } catch (e) {
-      if (mounted) setState(() => _error = errorText(e));
+    } catch (e, st) {
+      if (mounted) setState(() => _error = errorText(e, st));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -255,8 +326,8 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
         Text('من ${widget.from.name} إلى:',
             style: SaloniTextStyles.caption.copyWith(color: c.inkMuted)),
         const SizedBox(height: 12),
-        if (widget.targets.isEmpty) const Muted('لا يوجد حلاق آخر.'),
-        for (final t in widget.targets) ...[
+        if (_targets.isEmpty && _idle.isEmpty) const Muted('لا يوجد حلاق آخر.'),
+        for (final t in _targets) ...[
           Builder(builder: (_) {
             final st = t.day?.state;
             final unavailable = t.day == null || st == sa.BarberDayState.absentToday || !t.accepting;
@@ -274,6 +345,29 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
               onTap: unavailable ? null : () => setState(() => _to = t.id),
             );
           }),
+          const SizedBox(height: 8),
+        ],
+        for (final s in _idle) ...[
+          BarberOption(
+            key: Key('idle-${str(s, ['id'])}'),
+            name: str(s, ['name'], 'حلاق'),
+            note: str(s, ['role']) == 'manager' ? 'مدير' : 'حلاق',
+            unavailable: true,
+            reason: str(s, ['role']) == 'manager' ? ManagerAsBarber.noScheduleReason : 'لا دوام له اليوم',
+            selected: false,
+            onTap: null,
+          ),
+          if (str(s, ['role']) == 'manager')
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: SaloniButton(
+                key: Key('adopt-hours-${str(s, ['id'])}'),
+                label: ManagerAsBarber.adoptLabel,
+                size: SaloniButtonSize.sm,
+                variant: SaloniButtonVariant.ghost,
+                onPressed: _busy ? null : () => _adopt(s),
+              ),
+            ),
           const SizedBox(height: 8),
         ],
         const SizedBox(height: 6),
@@ -301,4 +395,18 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
       ],
     );
   }
+}
+
+/// طاقم نشط لا يظهر في `GET /manager/queues` (لا دوام له اليوم) — للعرض في
+/// ورقة النقل بسببه بدل أن يختفي بصمت.
+List<Map<String, dynamic>> idleStaff(
+  List<Map<String, dynamic>> staff,
+  List<sa.ManagerBarberQueue> scheduled, {
+  String? exclude,
+}) {
+  final ids = {for (final b in scheduled) b.id};
+  return [
+    for (final s in staff)
+      if (s['active'] != false && !ids.contains(str(s, ['id'])) && str(s, ['id']) != exclude) s,
+  ];
 }

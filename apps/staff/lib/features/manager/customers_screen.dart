@@ -228,8 +228,8 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
           if (mounted) toast(context, 'أُفرج عن الرقم');
       }
       _reload();
-    } catch (e) {
-      if (mounted) toast(context, errorText(e));
+    } catch (e, st) {
+      if (mounted) toast(context, errorText(e, st));
     }
   }
 
@@ -266,8 +266,8 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     try {
       await ref.read(servicesProvider).api.resolvePhoneDispute(accountId: accountId, walkInId: chosen);
       _reload();
-    } catch (e) {
-      if (mounted) toast(context, errorText(e));
+    } catch (e, st) {
+      if (mounted) toast(context, errorText(e, st));
     }
   }
 

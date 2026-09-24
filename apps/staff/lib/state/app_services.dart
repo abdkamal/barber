@@ -443,7 +443,13 @@ class AuthController extends ChangeNotifier {
   Future<void> _adoptOwner(String owner) async {
     final prev = services.prefs.storeOwner;
     if (prev != null && prev != owner) {
-      await services.destroyLocalStore();
+      // أفضل جهد: الدخول/التسجيل نجح على السيرفر، فلا يُفشله تعذّر مسح قاعدة
+      // الجهاز (كان يظهر «حدث خطأ غير متوقع» بعد إنشاء الصالون فعلًا).
+      try {
+        await services.destroyLocalStore();
+      } catch (e, st) {
+        debugPrint('[saloni] local store wipe failed: $e\n$st');
+      }
       pendingUnsyncedActions = 0;
       forcedSignOutNotice = null;
     }
@@ -502,14 +508,16 @@ class AuthController extends ChangeNotifier {
     if (h == null && open) {
       try {
         h = await services.openLocalStore();
-      } catch (_) {
+      } catch (e, st) {
+        debugPrint('[saloni] open local store failed: $e\n$st');
         return 0;
       }
     }
     if (h == null) return 0;
     try {
       return (await h.store.getOutbox()).length;
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[saloni] read outbox failed: $e\n$st');
       return 0;
     }
   }

@@ -60,8 +60,8 @@ class _ResetScreenState extends ConsumerState<ResetScreen> {
             newPassword: _pass.text,
           );
       if (mounted) setState(() => _done = true);
-    } catch (e) {
-      if (mounted) setState(() => _error = errorText(e));
+    } catch (e, st) {
+      if (mounted) setState(() => _error = errorText(e, st));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

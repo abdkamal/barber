@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:saloni_api/saloni_api.dart' as sa;
 import 'package:saloni_api/staff_sync.dart';
 
+import '../core/error_texts.dart';
 import '../core/format.dart';
 import '../core/platform/device_services.dart';
 import '../core/platform/storage.dart';
@@ -140,8 +141,8 @@ class BarberRepository extends ChangeNotifier {
   Future<void> start() async {
     try {
       _handle = await _openStore();
-    } catch (e) {
-      loadError = 'تعذّر فتح التخزين المحلي';
+    } catch (e, st) {
+      loadError = 'تعذّر فتح التخزين المحلي — ${describeError(e, st)}';
       ready = true;
       _notify();
       return;
@@ -276,8 +277,11 @@ class BarberRepository extends ChangeNotifier {
         );
       }
       pending = (await store.getOutbox()).length;
-    } catch (_) {
-      // بيانات محلية تالفة — نكمل بطابور فارغ حتى تصل بيانات السيرفر.
+    } catch (e, st) {
+      // بيانات محلية تالفة — نكمل بطابور فارغ حتى تصل بيانات السيرفر. لا
+      // يُبتلع الخطأ: يُطبع في السجل، وإن كانت القاعدة نفسها لا تعمل يظهر.
+      final text = describeError(e, st);
+      if (ErrorTexts.isLocalStoreError(e)) loadError = text;
     }
   }
 
@@ -391,8 +395,8 @@ class BarberRepository extends ChangeNotifier {
       } else if (e.code != 'SIGNED_OUT') {
         loadError = e.message;
       }
-    } catch (e) {
-      loadError = 'تعذّر قراءة بيانات الطابور';
+    } catch (e, st) {
+      loadError = 'تعذّر قراءة بيانات الطابور — ${describeError(e, st)}';
     } finally {
       _refreshing = false;
       _updateKeepAlive();

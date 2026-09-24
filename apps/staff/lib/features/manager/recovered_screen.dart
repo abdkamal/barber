@@ -44,8 +44,8 @@ class _RecoveredScreenState extends ConsumerState<RecoveredScreen> {
     try {
       await ref.read(servicesProvider).api.acknowledgeRecoveredEvent(item.id);
       if (mounted) setState(() => _reloadKey = UniqueKey());
-    } catch (e) {
-      if (mounted) toast(context, errorText(e));
+    } catch (e, st) {
+      if (mounted) toast(context, errorText(e, st));
     } finally {
       if (mounted) setState(() => _busy.remove(item.id));
     }

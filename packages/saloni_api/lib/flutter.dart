@@ -89,11 +89,14 @@ Future<void> wipeStaffSyncEncryptionKey({FlutterSecureStorage? storage}) async {
 /// (design.md §6.1). يستخدم `sqlcipher_flutter_libs` لتوفير مكتبة sqlite3
 /// المبنية بدعم SQLCipher على أندرويد/iOS.
 ///
-/// **ملاحظة صدق:** هذا المسار لم يُختبر فعليًا على جهاز/محاكي — لا يوجد
-/// Android SDK في بيئة التطوير الحالية (`docs/environment.md`). المنطق مبني
-/// على نمط الدمج الموثّق رسميًا بين `drift` و`sqlcipher_flutter_libs`
-/// (`PRAGMA key` عند فتح الاتصال)، ويجب التحقق منه على جهاز حقيقي في مرحلة
-/// تجربة نسخة التطوير قبل الاعتماد عليه.
+/// **إصلاح تجربة المرحلة 11:** القاعدة تعمل في **عزلة (isolate) خلفية**
+/// (`createInBackground`)، و`open.overrideFor` متغير عام لا ينتقل إلى العزلات
+/// الأخرى. كان التجاوز يُطبَّق في العزلة الرئيسية فقط، فتحاول العزلة الخلفية
+/// تحميل `libsqlite3.so` — غير موجود في الحزمة (فيها `libsqlcipher.so` فقط) —
+/// فيفشل **كل** تسجيل محلي على الهاتف («تعذّر التسجيل: حدث خطأ غير متوقع»).
+/// الآن يُطبَّق التجاوز داخل العزلة الخلفية (`isolateSetup`) ويُتحقق من أن
+/// المكتبة المحمّلة هي SQLCipher فعلًا (`PRAGMA cipher_version`)، فلا تُنشأ
+/// قاعدة غير مشفرة بصمت.
 QueryExecutor openEncryptedStaffSyncExecutor({
   required String fileName,
   required String encryptionKey,
@@ -101,12 +104,25 @@ QueryExecutor openEncryptedStaffSyncExecutor({
   return LazyDatabase(() async {
     final dir = await getApplicationSupportDirectory();
     final file = File('${dir.path}/$fileName');
-    open.overrideFor(OperatingSystem.android, openCipherOnAndroid);
+    await _useSqlCipher();
     return NativeDatabase.createInBackground(
       file,
+      isolateSetup: _useSqlCipher,
       setup: (rawDb) {
+        final version = rawDb.select('PRAGMA cipher_version;');
+        if (version.isEmpty || version.first.values.first == null) {
+          throw StateError('SQLCipher غير متاح — لا تُفتح القاعدة المحلية دون تشفير');
+        }
         rawDb.execute("PRAGMA key = '$encryptionKey';");
       },
     );
   });
+}
+
+/// يوجّه `package:sqlite3` إلى مكتبة SQLCipher المرفقة (أندرويد). يُستدعى في
+/// العزلة الرئيسية **وفي** عزلة القاعدة الخلفية (دالة عليا لا تلتقط حالة).
+Future<void> _useSqlCipher() async {
+  if (Platform.isAndroid) {
+    open.overrideFor(OperatingSystem.android, openCipherOnAndroid);
+  }
 }

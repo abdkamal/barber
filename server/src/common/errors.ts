@@ -53,7 +53,7 @@ export const Errors = {
       retryAfterSec,
     ),
   conflict: (code: string, message: string) => new ApiError(HttpStatus.CONFLICT, code, message),
-  internal: () => new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, 'INTERNAL_ERROR', 'حدث خطأ غير متوقع'),
+  internal: () => new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, 'INTERNAL', 'حدث خطأ غير متوقع'),
 };
 
 /** Review L8: upper bounds for money (minor units: 1,000,000.00) and a single service's base duration (8 h). */

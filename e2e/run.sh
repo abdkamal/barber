@@ -60,7 +60,12 @@ log "migrating $DIRECTORY_DB_NAME"
 npx ts-node --transpile-only src/cli/migrate.ts
 
 log "starting server on :$PORT"
-npx ts-node --transpile-only src/main.ts >"$E2E/.tmp/server.log" 2>&1 &
+# A server left over from an interrupted run would silently answer instead of this one.
+if curl -fsS --max-time 2 "http://127.0.0.1:$PORT/v1/health" >/dev/null 2>&1; then
+  echo "[e2e] port $PORT is already serving (stale server?) — stop it or set E2E_PORT" >&2; exit 1
+fi
+# Run ts-node directly (not via npx) so SERVER_PID is the server itself and cleanup really stops it.
+"$ROOT/node_modules/.bin/ts-node" --transpile-only src/main.ts >"$E2E/.tmp/server.log" 2>&1 &
 SERVER_PID=$!
 cleanup() { kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; }
 trap cleanup EXIT

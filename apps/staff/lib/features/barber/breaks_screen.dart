@@ -68,8 +68,8 @@ class BreaksScreen extends ConsumerWidget {
               : 'سُجّل أنك لن تعمل اليوم — يُرسل للمدير عند عودة الاتصال',
         );
       }
-    } catch (e) {
-      if (context.mounted) toast(context, 'تعذّر التسجيل: ${errorText(e)}');
+    } catch (e, st) {
+      if (context.mounted) toast(context, 'تعذّر التسجيل: ${errorText(e, st)}');
     }
   }
 
@@ -93,16 +93,16 @@ class BreaksScreen extends ConsumerWidget {
               : 'عدت للعمل اليوم — يُرسل التراجع عند عودة الاتصال',
         );
       }
-    } catch (e) {
-      if (context.mounted) toast(context, 'تعذّر التراجع: ${errorText(e)}');
+    } catch (e, st) {
+      if (context.mounted) toast(context, 'تعذّر التراجع: ${errorText(e, st)}');
     }
   }
 
   Future<void> _startBreak(BuildContext context, WidgetRef ref, sa.BreakKind kind) async {
     try {
       await ref.read(barberRepoProvider).startBreak(kind);
-    } catch (e) {
-      if (context.mounted) toast(context, errorText(e));
+    } catch (e, st) {
+      if (context.mounted) toast(context, errorText(e, st));
     }
   }
 

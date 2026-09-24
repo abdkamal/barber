@@ -787,17 +787,20 @@ class ApiClient {
       if (response.bodyBytes.isEmpty) return null;
       return jsonDecode(utf8.decode(response.bodyBytes));
     }
+    final requestId = response.headers['x-request-id'];
     Map<String, dynamic> json;
     try {
       json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
     } catch (_) {
+      // ليس ردًّا من السيرفر نفسه (مثل 502/504 من الوسيط حين يتوقف السيرفر).
       throw ApiError(
         code: 'HTTP_${response.statusCode}',
         message: 'حدث خطأ غير متوقع',
         statusCode: response.statusCode,
+        requestId: requestId,
       );
     }
-    throw ApiError.fromJson(json, statusCode: response.statusCode);
+    throw ApiError.fromJson(json, statusCode: response.statusCode, requestId: requestId);
   }
 
   /// تجديد رمز الوصول — محاولة واحدة متزامنة (single-flight): كل الطلبات

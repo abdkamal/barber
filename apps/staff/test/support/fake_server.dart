@@ -70,6 +70,15 @@ class FakeServer {
   final List<String> requests = [];
   Map<String, dynamic> impact = const {'changes': [], 'pastClosing': []};
   List<Map<String, dynamic>> managerQueues = const [];
+
+  /// المرحلة 11: `GET /manager/schedules` (يُضاف إليه ما يُحفظ بـ`PUT`).
+  List<Map<String, dynamic>> managerSchedules = [];
+
+  /// يُستدعى بعد كل `PUT /manager/schedules` (لمحاكاة أثره على الطوابير).
+  void Function(Map<String, dynamic> body)? onSchedulePut;
+
+  /// `GET /staff/today` بلا دوام اليوم (`day: null`).
+  bool noShift = false;
   List<String> closingWarnings = const [];
   Map<String, dynamic>? walkInResult;
   Map<String, dynamic>? registered;
@@ -207,11 +216,12 @@ class FakeServer {
     String? state = 'connected',
     bool accepting = true,
     List<Map<String, dynamic>> queue = const [],
+    String role = 'barber',
   }) =>
       {
         'id': id,
         'name': name,
-        'role': 'barber',
+        'role': role,
         'day': state == null
             ? null
             : {
@@ -290,7 +300,15 @@ class FakeServer {
         }, 201);
       case 'PUT /manager/schedules':
         schedulesPut.add(body());
+        managerSchedules = [
+          for (final r in managerSchedules)
+            if (!(r['staffId'] == body()['staffId'] && r['weekday'] == body()['weekday'])) r,
+          body(),
+        ];
+        onSchedulePut?.call(body());
         return json(body());
+      case 'GET /manager/schedules':
+        return json(managerSchedules);
       case 'POST /manager/services':
         servicesCreated.add(body());
         return json({'id': 'new-${servicesCreated.length}', ...body()}, 201);
@@ -298,7 +316,7 @@ class FakeServer {
         return http.Response('', 204);
       case 'GET /staff/today':
         return json({
-          'day': {
+          'day': noShift ? null : {
             'workDate': '2026-09-24',
             'workStart': now.subtract(const Duration(hours: 3)).toIso8601String(),
             'workEnd': now.add(const Duration(hours: 8)).toIso8601String(),
@@ -389,7 +407,6 @@ class FakeServer {
       case 'GET /manager/phone-disputes':
       case 'GET /manager/absences':
         return json(managerAbsences);
-      case 'GET /manager/schedules':
       case 'GET /manager/catalog':
       case 'GET /manager/services':
         return json([]);

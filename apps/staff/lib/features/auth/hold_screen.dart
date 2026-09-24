@@ -51,8 +51,8 @@ class _HoldScreenState extends ConsumerState<HoldScreen> {
     try {
       await ref.read(authProvider).recoverWithManager(username: _user.text, password: _pass.text);
       _pass.clear();
-    } catch (e) {
-      if (mounted) setState(() => _error = errorText(e));
+    } catch (e, st) {
+      if (mounted) setState(() => _error = errorText(e, st));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -71,8 +71,8 @@ class _HoldScreenState extends ConsumerState<HoldScreen> {
     setState(() => _busy = true);
     try {
       await ref.read(authProvider).discardHeld();
-    } catch (e) {
-      if (mounted) setState(() => _error = errorText(e));
+    } catch (e, st) {
+      if (mounted) setState(() => _error = errorText(e, st));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

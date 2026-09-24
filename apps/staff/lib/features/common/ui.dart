@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:saloni_api/saloni_api.dart' as sa;
 import 'package:saloni_ui/saloni_ui.dart';
+
+import '../../core/error_texts.dart';
 
 /// عناصر تخطيط مشتركة تطابق النموذج الأولي (appbar/section/bottombar في
 /// `design/prototype/generate.py`) — مبنية من رموز `saloni_ui` فقط.
@@ -334,16 +335,10 @@ void toast(BuildContext context, String text) {
   messenger?.showSnackBar(SnackBar(content: Text(text)));
 }
 
-String errorText(Object e) {
-  if (e is sa.ApiError) {
-    if (e.code == 'NETWORK_ERROR' || e.code == 'TIMEOUT') {
-      return 'تعذّر الاتصال بالسيرفر. تحقق من الإنترنت وحاول مجددًا.';
-    }
-    return e.message;
-  }
-  if (e is StateError) return e.message;
-  return 'حدث خطأ غير متوقع';
-}
+/// نص الخطأ المعروض للمستخدم (انظر `core/error_texts.dart`): نص عربي لكل رمز
+/// معروف، والحقل ومشكلته لأخطاء التحقق، ونوع فشل الشبكة، ورمز للإبلاغ
+/// (`S-…` من السيرفر، `C-…` من التطبيق) لغير المتوقع. يطبع الأصل في السجل.
+String errorText(Object e, [StackTrace? stack]) => describeError(e, stack);
 
 /// حوار تأكيد بأزرار نظام التصميم.
 Future<bool> confirmDialog(

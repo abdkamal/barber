@@ -13,4 +13,11 @@ abstract final class AppConfig {
   static const Duration heartbeat = Duration(seconds: 30);
 
   static const String appLabel = 'صالوني — الطاقم';
+
+  /// اسم التطبيق كما يظهر في «عن التطبيق».
+  static const String appName = 'صالوني — احجز دوري';
+
+  /// إصدار التطبيق — يطابق `version` في pubspec.yaml (لا تُستخدم حزمة
+  /// package_info). يمكن تجاوزه عند البناء: `--dart-define=APP_VERSION=…`.
+  static const String appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '0.1.0 (1)');
 }

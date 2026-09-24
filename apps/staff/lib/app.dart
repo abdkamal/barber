@@ -17,6 +17,7 @@ import 'features/barber/more_screen.dart';
 import 'features/barber/payments_screen.dart';
 import 'features/barber/queue_screen.dart';
 import 'features/barber/walkin_screen.dart';
+import 'features/common/about_screen.dart';
 import 'features/common/shells.dart';
 import 'features/manager/customers_screen.dart';
 import 'features/manager/queues_screen.dart';
@@ -62,6 +63,7 @@ GoRouter buildRouter(AuthController auth) {
       GoRoute(path: '/reset', builder: (_, __) => const ResetScreen()),
       GoRoute(path: '/signup', builder: (_, __) => const SignupScreen()),
       GoRoute(path: '/hold', builder: (_, __) => const HoldScreen()),
+      GoRoute(path: '/about', builder: (_, __) => const AboutScreen()),
       GoRoute(path: '/b/walkin', builder: (_, __) => const WalkInScreen()),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => BarberShell(shell: shell),

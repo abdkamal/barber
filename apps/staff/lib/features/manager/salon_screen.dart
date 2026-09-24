@@ -122,8 +122,8 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
         if (_lat != null && _lng != null) 'location': {'lat': _lat, 'lng': _lng},
       });
       if (mounted) toast(context, 'حُفظ ملف الصالون');
-    } catch (e) {
-      if (mounted) toast(context, errorText(e));
+    } catch (e, st) {
+      if (mounted) toast(context, errorText(e, st));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -186,8 +186,8 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
             ]);
       }
       if (mounted) toast(context, 'رُفعت الصورة');
-    } catch (e) {
-      if (mounted) toast(context, errorText(e));
+    } catch (e, st) {
+      if (mounted) toast(context, errorText(e, st));
     }
   }
 
@@ -198,8 +198,8 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
     try {
       await ref.read(servicesProvider).api.deleteManagerPhoto(str(p, ['id']));
       setState(() => _photos = _photos.where((x) => str(x, ['id']) != str(p, ['id'])).toList());
-    } catch (e) {
-      if (mounted) toast(context, errorText(e));
+    } catch (e, st) {
+      if (mounted) toast(context, errorText(e, st));
     }
   }
 
