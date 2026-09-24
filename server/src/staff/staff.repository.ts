@@ -10,13 +10,15 @@ export interface StaffRow {
   is_owner: boolean;
   call_ahead_minutes: number;
   token_version: number;
+  /** ق40: when the account was last suspended (null while active). */
+  suspended_at: Date | null;
   created_at: Date;
   last_login_at: Date | null;
 }
 
 export type StaffPublic = Omit<StaffRow, 'password_hash' | 'token_version'>;
 
-const PUBLIC_COLS = 'id, name, username, role, active, is_owner, call_ahead_minutes, created_at, last_login_at';
+const PUBLIC_COLS = 'id, name, username, role, active, is_owner, call_ahead_minutes, created_at, last_login_at, suspended_at';
 
 export function toStaffPublic(r: StaffRow | StaffPublic): StaffPublic {
   return {
@@ -29,6 +31,7 @@ export function toStaffPublic(r: StaffRow | StaffPublic): StaffPublic {
     call_ahead_minutes: r.call_ahead_minutes,
     created_at: r.created_at,
     last_login_at: r.last_login_at,
+    suspended_at: r.suspended_at,
   };
 }
 
@@ -65,17 +68,24 @@ export const StaffRepo = {
     id: string,
     patch: { name?: string; role?: 'barber' | 'manager'; active?: boolean; callAheadMinutes?: number },
     bumpTokenVersion: boolean,
+    now: Date = new Date(),
   ): Promise<StaffPublic | null> {
+    // ق40: the suspension time is recorded when the account goes active → inactive, kept while it
+    // stays suspended, and cleared when it is reactivated (SET expressions read the old row).
     const { rows } = await q.query<StaffPublic>(
       `UPDATE staff SET
          name = COALESCE($2, name),
          role = COALESCE($3, role),
+         suspended_at = CASE WHEN $4::boolean IS NULL THEN suspended_at
+                             WHEN $4::boolean THEN NULL
+                             WHEN active THEN $7::timestamptz
+                             ELSE COALESCE(suspended_at, $7::timestamptz) END,
          active = COALESCE($4, active),
          call_ahead_minutes = COALESCE($5, call_ahead_minutes),
          token_version = token_version + CASE WHEN $6 THEN 1 ELSE 0 END,
          updated_at = now()
        WHERE id = $1 RETURNING ${PUBLIC_COLS}`,
-      [id, patch.name ?? null, patch.role ?? null, patch.active ?? null, patch.callAheadMinutes ?? null, bumpTokenVersion],
+      [id, patch.name ?? null, patch.role ?? null, patch.active ?? null, patch.callAheadMinutes ?? null, bumpTokenVersion, now],
     );
     return rows[0] ?? null;
   },

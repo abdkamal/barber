@@ -194,6 +194,7 @@ class _ManagerSettingsScreenState extends ConsumerState<ManagerSettingsScreen> {
                 ValueRow(first: true, label: 'الطاقم والصلاحيات', value: 'فتح', onTap: () => context.push('/m/staff')),
                 ValueRow(label: 'الزبائن', value: 'فتح', onTap: () => context.push('/m/customers')),
                 ValueRow(label: 'الدوام والاستراحات والإجازات', value: 'فتح', onTap: () => context.push('/m/schedules')),
+                ValueRow(label: 'إجراءات مستردة للمراجعة', value: 'فتح', onTap: () => context.push('/m/recovered')),
                 ValueRow(label: 'طابوري (إن كنت تحلق أيضًا)', value: 'فتح', onTap: () => context.go('/b/queue')),
               ]),
             ]),

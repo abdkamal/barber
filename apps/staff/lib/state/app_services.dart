@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:saloni_api/saloni_api.dart' as sa;
+import 'package:saloni_api/staff_sync.dart' show Outbox;
 
 import '../core/config.dart';
 import '../core/format.dart';
@@ -118,6 +119,46 @@ final prefsProvider = ChangeNotifierProvider<AppPrefs>(
 
 enum AuthStatus { unknown, signedOut, signedIn }
 
+/// ق40: لماذا حُجز الجهاز على شاشة «سلّم الجهاز للمدير».
+enum HoldReason {
+  /// صاحب البيانات المحلية حاول الدخول فأجاب السيرفر `ACCOUNT_SUSPENDED`.
+  accountSuspended,
+
+  /// `SALON_SUSPENDED` — الصالون كله موقوف (لا يستطيع المدير الدخول حتى يُعاد تفعيله).
+  salonSuspended,
+
+  /// حساب **آخر** حاول الدخول على جهاز يحمل إجراءات لم تُرفع لصاحبه — يُمنع
+  /// (لا يُمسح ولا يرى الحساب الجديد شيئًا من بيانات السابق).
+  otherAccount,
+}
+
+/// ق40: جهاز يحمل إجراءات لم تُرفع لحساب لا يستطيع رفعها بنفسه (أو لحساب
+/// غير الذي يحاول الدخول). البيانات تبقى مشفّرة حتى يرفعها المدير أو تُمسح
+/// صراحة.
+class DeviceHold {
+  const DeviceHold({
+    required this.salonCode,
+    required this.username,
+    required this.pending,
+    required this.reason,
+  });
+
+  /// صاحب البيانات المحلية (من `storeOwner` = «رمز الصالون|اسم المستخدم»).
+  final String salonCode;
+  final String username;
+
+  /// عدد إجراءات الصندوق التي لم تُرفع.
+  final int pending;
+  final HoldReason reason;
+
+  DeviceHold copyWith({int? pending}) => DeviceHold(
+        salonCode: salonCode,
+        username: username,
+        pending: pending ?? this.pending,
+        reason: reason,
+      );
+}
+
 /// حالة الدخول والجلسة (ق17، ق18).
 class AuthController extends ChangeNotifier {
   AuthController(this.services) {
@@ -140,6 +181,12 @@ class AuthController extends ChangeNotifier {
 
   /// رسالة عربية تُعرض في شاشة الدخول بعد خروج قسري (§الإصلاح 1).
   String? forcedSignOutNotice;
+
+  /// ق40: الجهاز محجوز على شاشة «سلّم الجهاز للمدير» (انظر [DeviceHold]).
+  DeviceHold? hold;
+
+  /// ق40: نتيجة آخر رفع للمدير — تُعرض على شاشة الحجز حتى «تم» ([finishHold]).
+  sa.RecoveryReport? recoveryReport;
 
   bool get isManager => role == sa.UserRole.manager;
   Currency get currency => Currency.of(salon?.currency);
@@ -186,6 +233,20 @@ class AuthController extends ChangeNotifier {
   }) async {
     final code = salonCode.trim().toUpperCase();
     final user = username.trim();
+    final owner = '$code|$user';
+    // ق40: جهاز يحمل إجراءات لم تُرفع لحساب آخر — يُمنع الدخول قبل إرسال أي
+    // بيانات دخول (لا مسح، ولا يصل الحساب الجديد إلى بيانات السابق).
+    final prev = services.prefs.storeOwner;
+    if (prev != null && prev != owner) {
+      final pending = await _pendingOutboxCount(open: true);
+      if (pending > 0) {
+        _hold(prev, pending, HoldReason.otherAccount);
+        throw const sa.ApiError(
+          code: 'DEVICE_HELD',
+          message: 'على هذا الجهاز إجراءات لم تُرفع لحساب آخر — سلّم الجهاز للمدير.',
+        );
+      }
+    }
     sa.Session session;
     try {
       session = await services.api.loginStaff(
@@ -198,10 +259,23 @@ class AuthController extends ChangeNotifier {
       // ق: حساب أو صالون مُوقف — هذا هو المكان الوحيد الذي يصرّح فيه
       // السيرفر بذلك صراحة (docs/api.md)؛ إبطال الجلسات عن إيقاف يصل لاحقًا
       // بـ401 عامّ لا يميَّز عن إبطال جلسة عادي، فلا يُمسح التخزين هناك.
+      //
+      // ق40: إن بقيت في الصندوق إجراءات لم تُرفع لهذا الحساب نفسه لا يُمسح
+      // شيء — يُحجز الجهاز على شاشة «سلّم الجهاز للمدير» ليرفعها المدير (ما
+      // وقع قبل الإيقاف فقط)، أو تُمسح صراحة. بلا إجراءات معلّقة يُمسح كما كان.
       if (e.isAccountSuspended) {
-        await services.destroyLocalStore();
-        pendingUnsyncedActions = 0;
-        forcedSignOutNotice = null;
+        final pending = prev == owner ? await _pendingOutboxCount(open: true) : 0;
+        if (pending > 0) {
+          _hold(
+            owner,
+            pending,
+            e.code == 'SALON_SUSPENDED' ? HoldReason.salonSuspended : HoldReason.accountSuspended,
+          );
+        } else {
+          await services.destroyLocalStore();
+          pendingUnsyncedActions = 0;
+          forcedSignOutNotice = null;
+        }
       }
       rethrow;
     }
@@ -219,8 +293,102 @@ class AuthController extends ChangeNotifier {
     status = AuthStatus.signedIn;
     pendingUnsyncedActions = 0;
     forcedSignOutNotice = null;
+    hold = null;
+    recoveryReport = null;
     sessionKey++;
     notifyListeners();
+  }
+
+  void _hold(String owner, int pending, HoldReason reason) {
+    final sep = owner.indexOf('|');
+    hold = DeviceHold(
+      salonCode: sep < 0 ? owner : owner.substring(0, sep),
+      username: sep < 0 ? '' : owner.substring(sep + 1),
+      pending: pending,
+      reason: reason,
+    );
+    recoveryReport = null;
+    notifyListeners();
+  }
+
+  /// ق40: المدير يدخل على شاشة الحجز (بجلسة لا تُحفظ) فيُرفع الصندوق عبر
+  /// `POST /manager/staff/{id}/recover-events` نيابةً عن صاحب البيانات. بعد رد
+  /// السيرفر (قُبل ما وقع قبل الإيقاف، ورُفض ما بعده) يُمسح التخزين المحلي،
+  /// وتُنهى جلسة المدير على هذا الجهاز دائمًا. الأخطاء (بيانات دخول خاطئة،
+  /// ليس مديرًا، الحساب غير موقوف، شبكة) تُرمى ويبقى الصندوق كما هو.
+  Future<sa.RecoveryReport> recoverWithManager({
+    required String username,
+    required String password,
+  }) async {
+    final h = hold;
+    if (h == null) throw StateError('لا توجد إجراءات محجوزة على هذا الجهاز');
+    final session = await services.api.loginStaff(
+      salonCode: h.salonCode,
+      username: username.trim(),
+      password: password,
+      rememberMe: false,
+    );
+    try {
+      if (session.role != sa.UserRole.manager) {
+        throw const sa.ApiError(
+          code: 'NOT_MANAGER',
+          message: 'هذا الحساب ليس حساب مدير. يرفع الإجراءاتِ مديرُ الصالون فقط.',
+        );
+      }
+      final staff = await services.api.getManagerStaff();
+      final target = staff.whereType<Map>().where((m) => m['username'] == h.username).firstOrNull;
+      if (target == null) {
+        throw sa.ApiError(
+          code: 'STAFF_NOT_FOUND',
+          message: 'لم نجد الحساب «${h.username}» في طاقم هذا الصالون.',
+        );
+      }
+      final handle = services.activeHandle ?? await services.openLocalStore();
+      final outbox = Outbox(store: handle.store, api: services.api);
+      final report = await outbox.uploadForRecovery(target['id'] as String);
+      final left = await outbox.pendingCount();
+      if (left == 0) {
+        await _wipeHeld();
+        hold = h.copyWith(pending: 0);
+      } else {
+        hold = h.copyWith(pending: left);
+      }
+      recoveryReport = report;
+      notifyListeners();
+      return report;
+    } finally {
+      // جلسة المدير لا تبقى على جهاز الحلاق.
+      await services.api.logout();
+    }
+  }
+
+  /// ق40: «مسح دون رفع» (بعد تأكيد صريح) — حتى لا يبقى الجهاز محجوزًا.
+  Future<void> discardHeld() async {
+    await _wipeHeld();
+    hold = null;
+    recoveryReport = null;
+    notifyListeners();
+  }
+
+  /// ق40: إغلاق شاشة الحجز والعودة لشاشة الدخول. البيانات تبقى محفوظة، ويعود
+  /// الحجز عند أي محاولة دخول بحساب آخر (أو إن بقي الحساب موقوفًا).
+  void finishHold() {
+    hold = null;
+    recoveryReport = null;
+    notifyListeners();
+  }
+
+  /// ق40: يخفي ملخص رفع لم يكتمل (بقي في الصندوق ما لم يصل ردّه) لإعادة المحاولة.
+  void dismissRecoveryReport() {
+    recoveryReport = null;
+    notifyListeners();
+  }
+
+  Future<void> _wipeHeld() async {
+    await services.destroyLocalStore();
+    await services.prefs.setStoreOwner(null);
+    pendingUnsyncedActions = 0;
+    forcedSignOutNotice = null;
   }
 
   /// يحدّث بيانات الصالون (مثل انتهاء «بانتظار التفعيل») من `GET /auth/session`.
@@ -241,6 +409,15 @@ class AuthController extends ChangeNotifier {
     required Map<String, dynamic> salonData,
     required Map<String, dynamic> owner,
   }) async {
+    // ق40: لا يُمسح صندوق حساب آخر لم يُرفع بتسجيل صالون جديد على الجهاز.
+    final prev = services.prefs.storeOwner;
+    if (prev != null && await _pendingOutboxCount(open: true) > 0) {
+      _hold(prev, await _pendingOutboxCount(), HoldReason.otherAccount);
+      throw const sa.ApiError(
+        code: 'DEVICE_HELD',
+        message: 'على هذا الجهاز إجراءات لم تُرفع لحساب آخر — سلّم الجهاز للمدير.',
+      );
+    }
     final reg = await services.api.registerSalon(salon: salonData, owner: owner);
     final session = reg.session;
     await _adoptOwner('${session.salonCode}|${owner['username']}');
@@ -261,7 +438,8 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// إن دخل حساب مختلف على هذا الجهاز تُمسح بيانات الحساب السابق (§6.1).
+  /// إن دخل حساب مختلف على هذا الجهاز تُمسح بيانات الحساب السابق (§6.1) —
+  /// وقد تأكد [login] مسبقًا أن صندوقه فارغ (ق40: وإلا يُحجز الجهاز).
   Future<void> _adoptOwner(String owner) async {
     final prev = services.prefs.storeOwner;
     if (prev != null && prev != owner) {
@@ -317,8 +495,17 @@ class AuthController extends ChangeNotifier {
     _clear();
   }
 
-  Future<int> _pendingOutboxCount() async {
-    final h = services.activeHandle;
+  /// عدد إجراءات الصندوق المعلّقة. `open: true` يفتح القاعدة (مقبضًا واحدًا
+  /// متتبَّعًا) إن لم تكن مفتوحة — عند الدخول بعد خروج قسري.
+  Future<int> _pendingOutboxCount({bool open = false}) async {
+    var h = services.activeHandle;
+    if (h == null && open) {
+      try {
+        h = await services.openLocalStore();
+      } catch (_) {
+        return 0;
+      }
+    }
     if (h == null) return 0;
     try {
       return (await h.store.getOutbox()).length;

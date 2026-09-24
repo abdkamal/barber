@@ -494,6 +494,39 @@ class ApiClient {
       await _send('POST', '/manager/staff/$id/reset-code')
           as Map<String, dynamic>;
 
+  // ---- ق40: إجراءات حساب موقوف ----
+
+  /// يرفع المدير — من جهاز حساب **موقوف** — إجراءاته التي لم تُزامن
+  /// (`POST /manager/staff/{id}/recover-events`). تُقسَّم إلى دفعات من 200
+  /// (حد السيرفر) بترتيب رقم تسلسل الجهاز، وتُدمج النتائج. يُطبّق فقط ما وقع
+  /// قبل وقت الإيقاف (بالساعة الرتيبة المصححة)؛ ما بعده يعود
+  /// `rejectedAfterSuspension`. إعادة الرفع آمنة (تكرار ← `duplicate`).
+  /// `409 ACCOUNT_NOT_SUSPENDED` إن لم يكن الحساب موقوفًا.
+  Future<RecoveryReport> recoverStaffEvents({
+    required String staffId,
+    required List<DeviceEvent> events,
+  }) async {
+    final sorted = [...events]..sort((a, b) => a.deviceSeq.compareTo(b.deviceSeq));
+    var report = RecoveryReport(staffId: staffId);
+    for (var i = 0; i < sorted.length; i += 200) {
+      final chunk = sorted.skip(i).take(200).toList();
+      final json = await _send('POST', '/manager/staff/$staffId/recover-events',
+          body: {'events': chunk.map((e) => e.toJson()).toList()});
+      report = report.merge(RecoveryReport.fromJson(json as Map<String, dynamic>));
+    }
+    return report;
+  }
+
+  /// «إجراءات مستردة للمراجعة» — بانتظار المراجعة فقط، أو الكل (`all`).
+  Future<List<RecoveredEventItem>> getRecoveredEvents({bool all = false}) async =>
+      parseList(
+          await _send('GET', '/manager/recovered-events${all ? '?status=all' : ''}'),
+          RecoveredEventItem.fromJson);
+
+  /// يعلّم إجراءً مستردًا «رُوجع» (مسجّل في التدقيق؛ تكراره آمن).
+  Future<void> acknowledgeRecoveredEvent(String id) async =>
+      await _send('POST', '/manager/recovered-events/$id/ack');
+
   // ---- الدوام والاستراحات والإجازات ----
 
   /// `[{staffId | null, weekday (0=الأحد), opensAt, closesAt}]`.

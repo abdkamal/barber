@@ -106,8 +106,8 @@ void main() {
   );
 
   testWidgets(
-    'دخول حساب مختلف على نفس الجهاز بعد خروج قسري: يُمسح التخزين المحلي '
-    'للحساب السابق',
+    'ق40: دخول حساب مختلف على جهاز يحمل إجراءات لم تُرفع لصاحبه: يُحجز '
+    'الجهاز (لا مسح ولا دخول)، وبصندوق فارغ يُمسح ويدخل الحساب الجديد كما كان',
     (tester) async {
       final server = FakeServer(role: 'barber');
       server.booking(id: 'q1', name: 'فهد');
@@ -125,16 +125,33 @@ void main() {
       expect(h.auth.status, AuthStatus.signedOut);
       expect(await storage.shared.getOutbox(), isNotEmpty, reason: 'لم يُمسح بعد — السبب غير معروف');
 
-      // حلاق آخر (اسم مستخدم مختلف) يسجّل دخوله على هذا الجهاز.
+      // حلاق آخر (اسم مستخدم مختلف) يحاول الدخول على هذا الجهاز.
       server.sessionRevoked = false;
-      await h.auth.login(salonCode: 'RAHA-27', username: 'sami', password: 'y', rememberMe: true);
+      final loginsBefore = server.requests.where((r) => r == 'POST /auth/staff/login').length;
+      await expectLater(
+        h.auth.login(salonCode: 'RAHA-27', username: 'sami', password: 'y', rememberMe: true),
+        throwsA(isA<sa.ApiError>().having((e) => e.code, 'code', 'DEVICE_HELD')),
+      );
       await settle(tester);
 
-      expect(h.auth.status, AuthStatus.signedIn);
-      expect(await storage.shared.getOutbox(), isEmpty,
-          reason: 'حساب مختلف على الجهاز — يُمسح صندوق الحساب السابق ولا يُزامَن (§6.1)');
+      expect(h.auth.status, AuthStatus.signedOut, reason: 'لا يدخل حساب آخر فوق إجراءات لم تُرفع');
+      expect(h.auth.hold?.reason, HoldReason.otherAccount);
+      expect(h.auth.hold?.username, 'khaled');
+      expect(server.requests.where((r) => r == 'POST /auth/staff/login').length, loginsBefore,
+          reason: 'حُجز الجهاز قبل إرسال بيانات دخول سامي');
+      expect(await storage.shared.getOutbox(), isNotEmpty, reason: 'الصندوق باقٍ مشفّرًا');
       expect(server.eventTypes, isNot(contains('break_started')),
           reason: 'الإجراء المعلّق لخالد لم يُزامَن أبدًا مع حساب سامي');
+      expect(find.text('إجراءات حساب آخر'), findsOneWidget);
+
+      // صاحب الجهاز يمسح دون رفع (بتأكيد) ← يدخل سامي على جهاز نظيف.
+      await h.auth.discardHeld();
+      await settle(tester);
+      expect(await storage.shared.getOutbox(), isEmpty);
+      await h.auth.login(salonCode: 'RAHA-27', username: 'sami', password: 'y', rememberMe: true);
+      await settle(tester);
+      expect(h.auth.status, AuthStatus.signedIn);
+      expect(server.eventTypes, isNot(contains('break_started')));
 
       await teardownApp(tester, h);
     },

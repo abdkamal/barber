@@ -10,7 +10,8 @@ import type { TenantContext } from '../tenancy/tenant-context';
 import { CurrentPrincipal, Tenant } from '../tenancy/tenant.decorator';
 import { SyncService } from './sync.service';
 
-const Event = z.object({
+/** One device event — shared with the ق40 recovery upload (`recovery.controller.ts`). */
+export const Event = z.object({
   id: z.string().uuid(),
   deviceSeq: z.number().int().min(0),
   type: z.string().min(1).max(40),
@@ -19,7 +20,7 @@ const Event = z.object({
   approximate: z.boolean().optional().default(false),
   payload: z.record(z.string(), z.unknown()).optional().default({}),
 });
-const Batch = z.object({ events: z.array(Event).max(200) }).strict();
+export const Batch = z.object({ events: z.array(Event).max(200) }).strict();
 const PullQuery = z.object({ since: z.coerce.number().int().min(0).default(0) });
 
 /** Staff sync (design §6, api.md). */

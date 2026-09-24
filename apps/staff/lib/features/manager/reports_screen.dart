@@ -202,6 +202,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     final disputes = intOf(pending, ['phoneDisputes']) ?? 0;
     // اختلاف بين المبلغ الذي أكده الحلاق وسعر السيرفر (مراجعة المرحلة 6).
     final discrepancies = intOf(pending, ['paymentDiscrepancies']) ?? 0;
+    final recovered = intOf(pending, ['recoveredEvents']) ?? 0;
 
     return [
       LayoutBuilder(builder: (context, box) {
@@ -306,7 +307,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
           ),
         ]),
       Section(title: 'المعلّقات', children: [
-        if (unconfirmed + conflicts + accounts + disputes + discrepancies == 0)
+        if (unconfirmed + conflicts + accounts + disputes + discrepancies + recovered == 0)
           const SaloniBanner(tone: SaloniBannerTone.success, body: 'لا معلّقات تحتاج قرارك.'),
         if (unconfirmed > 0)
           SaloniBanner(
@@ -340,6 +341,18 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
               size: SaloniButtonSize.sm,
               variant: SaloniButtonVariant.secondary,
               onPressed: () => context.push('/m/customers'),
+            ),
+          ),
+        if (recovered > 0)
+          SaloniBanner(
+            tone: SaloniBannerTone.warning,
+            title: digits('$recovered إجراء مسترد للمراجعة'),
+            body: 'رُفعت من جهاز حساب موقوف (ما وقع قبل الإيقاف فقط).',
+            action: SaloniButton(
+              label: 'مراجعة',
+              size: SaloniButtonSize.sm,
+              variant: SaloniButtonVariant.secondary,
+              onPressed: () => context.push('/m/recovered'),
             ),
           ),
         if (conflicts > 0)

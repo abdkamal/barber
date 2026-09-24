@@ -212,7 +212,7 @@ export const ReportsRepo = {
 
   /** Pending items (design §9.6) — current state, not tied to the report's date range. */
   async pendingItems(q: TenantQueryable) {
-    const [payments, syncConflicts, pendingAccounts, phoneDisputes, discrepancies, unfinished] = await Promise.all([
+    const [payments, syncConflicts, pendingAccounts, phoneDisputes, discrepancies, unfinished, recovered] = await Promise.all([
       q.query<{ n: string }>("SELECT count(*) AS n FROM payments WHERE status = 'awaiting_confirmation'"),
       // Unresolved rows in `sync_conflicts` (migration 002 — bookings/sync module, design §3/§6.2).
       q.query<{ n: string }>('SELECT count(*) AS n FROM sync_conflicts WHERE resolved_at IS NULL'),
@@ -222,6 +222,9 @@ export const ReportsRepo = {
       q.query<{ n: string }>('SELECT count(*) AS n FROM payments WHERE discrepancy'),
       // Round 2 (item 4): services still in progress from a business day that was closed out.
       q.query<{ n: string }>("SELECT count(*) AS n FROM bookings WHERE status = 'in_service' AND day_closed_at IS NOT NULL"),
+      // ق40: events a manager recovered from a suspended account's device, not yet acknowledged
+      // (a subset of syncConflicts — listed by GET /manager/recovered-events).
+      q.query<{ n: string }>("SELECT count(*) AS n FROM sync_conflicts WHERE kind = 'recovered_event' AND resolved_at IS NULL"),
     ]);
     return {
       unconfirmedPayments: Number(payments.rows[0]!.n),
@@ -230,6 +233,7 @@ export const ReportsRepo = {
       phoneDisputes: Number(phoneDisputes.rows[0]!.n),
       paymentDiscrepancies: Number(discrepancies.rows[0]!.n),
       unfinishedServices: Number(unfinished.rows[0]!.n),
+      recoveredEvents: Number(recovered.rows[0]!.n),
     };
   },
 };

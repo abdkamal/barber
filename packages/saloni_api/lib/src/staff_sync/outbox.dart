@@ -56,6 +56,26 @@ class Outbox {
   /// عدد الأحداث بانتظار الإرسال حاليًا.
   Future<int> pendingCount() async => (await store.getOutbox()).length;
 
+  /// ق40: كل أحداث الصندوق بترتيب رقم تسلسل الجهاز (متجاوزًا مهلة التراجع)،
+  /// بأوقاتها المحسوبة بالساعة الرتيبة كما سُجّلت — لرفعها عبر مسار المدير
+  /// حين يكون الحساب موقوفًا.
+  Future<List<DeviceEvent>> exportPending() async =>
+      [for (final e in await store.getOutbox()) e.event];
+
+  /// ق40: يرفع المدير (بجلسته هو على هذا الجهاز) كل أحداث الصندوق نيابةً عن
+  /// الحساب الموقوف [staffId]. كل حدث عاد بنتيجة يُزال من الصندوق (كلها
+  /// نهائية: طُبّق، أو تكرر، أو رُفض)؛ ما لم يرد في الرد يبقى. عند فشل الرفع
+  /// (شبكة، `409 ACCOUNT_NOT_SUSPENDED`…) يُرمى `ApiError` ويبقى الصندوق كما هو.
+  Future<RecoveryReport> uploadForRecovery(String staffId) async {
+    final events = await exportPending();
+    final report = await api.recoverStaffEvents(staffId: staffId, events: events);
+    final answered = {for (final o in report.results) o.eventId};
+    for (final e in events) {
+      if (answered.contains(e.id)) await store.removeOutboxEntry(e.id);
+    }
+    return report;
+  }
+
   Duration _backoffFor(int attempts) {
     final millis = _baseBackoff.inMilliseconds * (1 << attempts.clamp(0, 10));
     final capped = millis.clamp(0, _maxBackoff.inMilliseconds);

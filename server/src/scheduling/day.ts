@@ -404,12 +404,14 @@ export interface BookingEventInput {
   deviceSeq?: number | null;
   approximate?: boolean;
   reason?: string | null;
+  /** ق40: the manager who uploaded this device event on behalf of a suspended account. */
+  recoveredBy?: string | null;
 }
 
 export async function insertBookingEvent(q: TenantQueryable, e: BookingEventInput): Promise<void> {
   await q.query(
-    `INSERT INTO booking_events (id, booking_id, type, payload, occurred_at, actor_kind, actor_id, device_id, device_seq, approximate_time, reason)
-     VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    `INSERT INTO booking_events (id, booking_id, type, payload, occurred_at, actor_kind, actor_id, device_id, device_seq, approximate_time, reason, recovered_by_staff_id)
+     VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [
       e.id ?? null,
       e.bookingId,
@@ -422,6 +424,7 @@ export async function insertBookingEvent(q: TenantQueryable, e: BookingEventInpu
       e.deviceSeq ?? null,
       e.approximate ?? false,
       e.reason ?? null,
+      e.recoveredBy ?? null,
     ],
   );
 }

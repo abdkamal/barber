@@ -13,6 +13,7 @@ import { isUniqueViolation } from '../db/sql';
 import { writeAudit } from '../security/audit';
 import { clientIp } from '../security/client-ip';
 import { RateLimit } from '../security/rate-limit.guard';
+import { Clock } from '../scheduling/clock';
 import type { TenantContext } from '../tenancy/tenant-context';
 import { CurrentPrincipal, Tenant } from '../tenancy/tenant.decorator';
 import { StaffRepo } from './staff.repository';
@@ -41,6 +42,7 @@ export class StaffController {
   constructor(
     private readonly hasher: PasswordHasher,
     private readonly resets: PasswordResetService,
+    private readonly clock: Clock,
   ) {}
 
   @Get()
@@ -89,7 +91,7 @@ export class StaffController {
       if (losesManager && (await StaffRepo.countActiveManagers(q)) <= 1) {
         throw Errors.conflict('LAST_MANAGER', 'يجب أن يبقى للصالون مدير نشط واحد على الأقل');
       }
-      const s = await StaffRepo.update(q, id, body, roleChanged || deactivated);
+      const s = await StaffRepo.update(q, id, body, roleChanged || deactivated, new Date(this.clock.now()));
       if (roleChanged || deactivated) await SessionsRepo.revokeAllFor(q, 'staff', id, roleChanged ? 'role_changed' : 'deactivated');
       if (roleChanged || body.active !== undefined) {
         await writeAudit(q, {

@@ -244,6 +244,13 @@ class StaffSyncEngine {
     }
   }
 
+  /// ق40: يوقف الحلقة ويصدّر أحداث الصندوق كلها لرفعها عبر مسار المدير
+  /// (الحساب موقوف فلا يستطيع المحرك إرسالها بنفسه).
+  Future<List<DeviceEvent>> exportPendingForRecovery() async {
+    stop();
+    return outbox.exportPending();
+  }
+
   /// يمسح كل التخزين المحلي — عند تسجيل الخروج أو إيقاف الحساب (design.md §6.1).
   Future<void> wipeOnLogout() async {
     stop();

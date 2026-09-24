@@ -9,6 +9,7 @@ import 'package:saloni_ui/saloni_ui.dart';
 
 import 'core/config.dart';
 import 'core/platform/push.dart';
+import 'features/auth/hold_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/reset_screen.dart';
 import 'features/barber/breaks_screen.dart';
@@ -19,6 +20,7 @@ import 'features/barber/walkin_screen.dart';
 import 'features/common/shells.dart';
 import 'features/manager/customers_screen.dart';
 import 'features/manager/queues_screen.dart';
+import 'features/manager/recovered_screen.dart';
 import 'features/manager/reports_screen.dart';
 import 'features/manager/salon_screen.dart';
 import 'features/manager/schedules_screen.dart';
@@ -45,9 +47,11 @@ GoRouter buildRouter(AuthController auth) {
         case AuthStatus.unknown:
           return loc == '/splash' ? null : '/splash';
         case AuthStatus.signedOut:
+          // ق40: جهاز يحمل إجراءات لم تُرفع لحساب لا يستطيع رفعها — «سلّم الجهاز للمدير».
+          if (auth.hold != null) return loc == '/hold' ? null : '/hold';
           return publicPaths.contains(loc) ? null : '/login';
         case AuthStatus.signedIn:
-          if (loc == '/splash' || publicPaths.contains(loc)) return homeFor(auth);
+          if (loc == '/splash' || loc == '/hold' || publicPaths.contains(loc)) return homeFor(auth);
           if (isManagerPath(loc) && !auth.isManager) return '/b/queue';
           return null;
       }
@@ -57,6 +61,7 @@ GoRouter buildRouter(AuthController auth) {
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/reset', builder: (_, __) => const ResetScreen()),
       GoRoute(path: '/signup', builder: (_, __) => const SignupScreen()),
+      GoRoute(path: '/hold', builder: (_, __) => const HoldScreen()),
       GoRoute(path: '/b/walkin', builder: (_, __) => const WalkInScreen()),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => BarberShell(shell: shell),
@@ -78,6 +83,7 @@ GoRouter buildRouter(AuthController auth) {
       GoRoute(path: '/m/staff', builder: (_, __) => const StaffScreen()),
       GoRoute(path: '/m/customers', builder: (_, __) => const CustomersScreen()),
       GoRoute(path: '/m/schedules', builder: (_, __) => const SchedulesScreen()),
+      GoRoute(path: '/m/recovered', builder: (_, __) => const RecoveredScreen()),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => ManagerShell(shell: shell),
         branches: [

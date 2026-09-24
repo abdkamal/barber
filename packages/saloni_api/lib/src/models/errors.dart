@@ -46,6 +46,10 @@ class ApiError implements Exception {
   bool get isAccountSuspended =>
       code == 'ACCOUNT_SUSPENDED' || code == 'SALON_SUSPENDED';
 
+  /// ق40: رفع إجراءات حساب **غير موقوف** عبر مسار المدير (`409
+  /// ACCOUNT_NOT_SUSPENDED`) — يرفعها صاحب الحساب بنفسه عند دخوله.
+  bool get isAccountNotSuspended => code == 'ACCOUNT_NOT_SUSPENDED';
+
   Map<String, dynamic>? get _detailsMap =>
       details is Map ? Map<String, dynamic>.from(details as Map) : null;
 

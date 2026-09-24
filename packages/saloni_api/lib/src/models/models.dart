@@ -9,6 +9,7 @@ export 'manager.dart';
 export 'payment.dart';
 export 'push_notification.dart';
 export 'quote.dart';
+export 'recovery.dart';
 export 'salon_public_profile.dart';
 export 'service.dart';
 export 'session.dart';

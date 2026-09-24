@@ -14,6 +14,7 @@ import { PostCommit } from './scheduling/post-commit';
 import { StaffDayController } from './staff-day/staff-day.controller';
 import { StaffDayService } from './staff-day/staff-day.service';
 import { StaffStream } from './sync/staff-stream';
+import { RecoveryController } from './sync/recovery.controller';
 import { SyncController } from './sync/sync.controller';
 import { SyncService } from './sync/sync.service';
 
@@ -31,7 +32,7 @@ function notifierFor(config: AppConfig): Notifier {
  * TenantContext of the verified token (or, for the scheduler, TenantResolver per salon).
  */
 @Module({
-  controllers: [BookingsController, StaffDayController, SyncController, DevicesController, ManagerQueuesController],
+  controllers: [BookingsController, StaffDayController, SyncController, RecoveryController, DevicesController, ManagerQueuesController],
   providers: [
     Clock,
     ChangeBus,

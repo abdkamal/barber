@@ -22,6 +22,29 @@ class FakeServer {
   /// المكان الوحيد الذي يصرّح فيه السيرفر بالإيقاف صراحة.
   bool loginSuspended = false;
 
+  /// ق40: أسماء مستخدمين موقوفة عند الدخول (`403 ACCOUNT_SUSPENDED`) — بدل
+  /// إيقاف كل عمليات الدخول كما في [loginSuspended].
+  final Set<String> suspendedUsers = {};
+
+  /// ق40: دور كل اسم مستخدم عند الدخول (الافتراضي [role]).
+  final Map<String, String> loginRoles = {};
+
+  /// ق40: الطاقم في `GET /manager/staff` (`{id, name, username, role, active}`).
+  List<Map<String, dynamic>> managerStaff = const [];
+
+  /// ق40: وقت الإيقاف الذي يقارن به `recover-events` (null = الحساب غير موقوف ← 409).
+  DateTime? suspendedAt;
+
+  /// ق40: الأحداث التي رفعها المدير (بترتيب الوصول) ولمن.
+  final List<Map<String, dynamic>> recoveredUploads = [];
+
+  /// ق40: `GET /manager/recovered-events`، و`ack` يزيل العنصر.
+  List<Map<String, dynamic>> recoveredItems = [];
+  final List<String> acknowledged = [];
+
+  /// آخر جلسة أُصدرت بالدخول (الدور حسب [loginRoles]).
+  String? lastLoginUser;
+
   /// معرّفات حجوزات يرفض السيرفر الوهمي حدث `postponed` عليها (لمحاكاة رفض
   /// حقيقي — ق23/design.md §6.2 — عندما لا يُصرَّح بإعفاء `canPostpone`).
   final Set<String> rejectPostponeForBookingIds = {};
@@ -218,6 +241,13 @@ class FakeServer {
       }, 401);
     }
 
+    if (path == '/auth/staff/login') lastLoginUser = body()['username'] as String?;
+    if (path == '/auth/staff/login' && suspendedUsers.contains(lastLoginUser)) {
+      return json({
+        'error': {'code': 'ACCOUNT_SUSPENDED', 'message': 'هذا الحساب موقوف'}
+      }, 403);
+    }
+
     if (loginSuspended && path == '/auth/staff/login') {
       return json({
         'error': {'code': 'ACCOUNT_SUSPENDED', 'message': 'هذا الحساب موقوف'}
@@ -226,6 +256,7 @@ class FakeServer {
 
     switch ('${req.method} $path') {
       case 'POST /auth/staff/login':
+        return json({...session(), 'role': loginRoles[lastLoginUser] ?? role});
       case 'POST /auth/refresh':
         return json(session());
       case 'POST /salons/register':
@@ -315,8 +346,11 @@ class FakeServer {
         return json({'role': registered != null ? 'manager' : sess['role'], 'accountId': 'barber-1', 'salon': salon});
       case 'GET /manager/settings':
         return json({'requireAccountApproval': false, 'maxActiveBookingsPerCustomer': 1});
-      case 'GET /manager/breaks':
       case 'GET /manager/staff':
+        return json(managerStaff);
+      case 'GET /manager/recovered-events':
+        return json(recoveredItems);
+      case 'GET /manager/breaks':
       case 'GET /manager/phone-disputes':
       case 'GET /manager/schedules':
       case 'GET /manager/absences':
@@ -353,6 +387,41 @@ class FakeServer {
       final id = path.split('/')[3];
       transfers.add({'bookingId': id, ...body()});
       return json(bookingJson(id: id, name: 'زبون', barberId: body()['toBarberId'] as String));
+    }
+    if (req.method == 'POST' && path.startsWith('/manager/staff/') && path.endsWith('/recover-events')) {
+      final staffId = path.split('/')[3];
+      final cut = suspendedAt;
+      if (cut == null) {
+        return json({
+          'error': {'code': 'ACCOUNT_NOT_SUSPENDED', 'message': 'هذا الحساب غير موقوف — يرفع صاحبه إجراءاته بنفسه عند الدخول'}
+        }, 409);
+      }
+      final list = (body()['events'] as List).cast<Map<String, dynamic>>();
+      recoveredUploads.addAll([for (final e in list) {...e, 'staffId': staffId}]);
+      final results = [
+        for (final e in list)
+          DateTime.parse(e['occurredAt'] as String).isBefore(cut)
+              ? {'eventId': e['id'], 'result': 'applied'}
+              : {'eventId': e['id'], 'result': 'rejected_after_suspension', 'reason': 'AFTER_SUSPENSION'},
+      ];
+      int n(String r) => results.where((x) => x['result'] == r).length;
+      return json({
+        'staffId': staffId,
+        'suspendedAt': cut.toUtc().toIso8601String(),
+        'results': results,
+        'summary': {
+          'applied': n('applied'),
+          'duplicate': 0,
+          'rejectedAfterSuspension': n('rejected_after_suspension'),
+          'rejectedInvalid': 0,
+        },
+      });
+    }
+    if (req.method == 'POST' && path.startsWith('/manager/recovered-events/') && path.endsWith('/ack')) {
+      final id = path.split('/')[3];
+      acknowledged.add(id);
+      recoveredItems = [for (final i in recoveredItems) if (i['id'] != id) i];
+      return json({'ok': true});
     }
     if (path.startsWith('/manager/customers/')) {
       final parts = path.split('/'); // ['', 'manager', 'customers', '{id}', ...]

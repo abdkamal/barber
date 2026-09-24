@@ -67,6 +67,35 @@ export interface EventOutcome {
   reason?: string;
 }
 
+export interface ApplyOpts {
+  /** Design §6.5 (service level): events after this instant are refused, earlier ones flagged. */
+  revokedAt?: number;
+  /**
+   * ق40: a manager uploads the pending events of a SUSPENDED account from its device. Only events
+   * strictly before `suspendedAt` are applied (flagged, marked with the manager, listed for review).
+   */
+  recovery?: { by: string; suspendedAt: number };
+}
+
+/** ق40: per-event result of a manager recovery upload. */
+export type RecoveryResult = 'applied' | 'duplicate' | 'rejected_after_suspension' | 'rejected_invalid';
+
+export interface RecoveryOutcome {
+  eventId: string;
+  result: RecoveryResult;
+  reason?: string;
+}
+
+export interface RecoveryResponse {
+  staffId: string;
+  suspendedAt: string;
+  results: RecoveryOutcome[];
+  summary: { applied: number; duplicate: number; rejectedAfterSuspension: number; rejectedInvalid: number };
+}
+
+/** ق40: reason of an event whose device time is not before the suspension. */
+export const AFTER_SUSPENSION = 'AFTER_SUSPENSION';
+
 /** A transition the state machine refuses (recorded for the manager, design §6.2). */
 class Reject extends Error {
   constructor(
@@ -94,6 +123,8 @@ interface EvCtx {
   now: number;
   flagged: boolean;
   batch: BatchState;
+  /** ق40: the manager recovering this event for a suspended account (null = normal sync). */
+  recoveredBy: string | null;
 }
 
 /** Per-batch bookkeeping: conflict rows for the manager are capped per batch (review M4). */
@@ -156,7 +187,7 @@ export class SyncService {
     private readonly notifications: NotificationService,
   ) {}
 
-  async applyBatch(t: TenantContext, me: Principal, events: DeviceEventIn[], opts: { revokedAt?: number } = {}): Promise<EventOutcome[]> {
+  async applyBatch(t: TenantContext, me: Principal, events: DeviceEventIn[], opts: ApplyOpts = {}): Promise<EventOutcome[]> {
     const sorted = [...events].sort((a, b) => a.deviceSeq - b.deviceSeq);
     const out = new Map<string, EventOutcome>();
     const batch: BatchState = { conflicts: 0, suppressed: 0 };
@@ -178,7 +209,7 @@ export class SyncService {
         seen.set(ev.id, 'rejected');
       }
     }
-    if (junk.length) await this.recordJunk(t, me, junk);
+    if (junk.length) await this.recordJunk(t, me, junk, opts.recovery?.by ?? null);
     for (const ev of sorted) if (!out.has(ev.id)) out.set(ev.id, await this.applyOne(t, me, ev, opts, batch));
     if (batch.suppressed) {
       await t.db.query('INSERT INTO sync_conflicts (staff_id, kind, details) VALUES ($1, $2, $3)', [
@@ -191,11 +222,11 @@ export class SyncService {
     return events.map((e) => out.get(e.id)!);
   }
 
-  private async recordJunk(t: TenantContext, me: Principal, junk: Array<{ ev: DeviceEventIn; reason: string }>): Promise<void> {
+  private async recordJunk(t: TenantContext, me: Principal, junk: Array<{ ev: DeviceEventIn; reason: string }>, recoveredBy: string | null): Promise<void> {
     await t.db.tx(async (q) => {
       await q.query(
-        `INSERT INTO device_events (id, staff_id, device_id, device_seq, type, booking_id, payload, occurred_at, approximate, result, reason, flagged)
-         SELECT x.id, $1, $2, x.seq, x.type, x.booking_id, '{}'::jsonb, $3, false, 'rejected', x.reason, true
+        `INSERT INTO device_events (id, staff_id, device_id, device_seq, type, booking_id, payload, occurred_at, approximate, result, reason, flagged, recovered_by_staff_id)
+         SELECT x.id, $1, $2, x.seq, x.type, x.booking_id, '{}'::jsonb, $3, false, 'rejected', x.reason, true, $9
            FROM unnest($4::uuid[], $5::bigint[], $6::text[], $7::uuid[], $8::text[]) AS x(id, seq, type, booking_id, reason)
          ON CONFLICT (id) DO NOTHING`,
         [
@@ -207,6 +238,7 @@ export class SyncService {
           junk.map((j) => String(j.ev.type).slice(0, 40)),
           junk.map((j) => (isUuid(j.ev.bookingId) ? j.ev.bookingId : null)),
           junk.map((j) => j.reason),
+          recoveredBy,
         ],
       );
       await q.query('INSERT INTO sync_conflicts (staff_id, kind, details) VALUES ($1, $2, $3)', [
@@ -217,13 +249,14 @@ export class SyncService {
     });
   }
 
-  private async applyOne(t: TenantContext, me: Principal, ev: DeviceEventIn, opts: { revokedAt?: number }, batch: BatchState = { conflicts: 0, suppressed: 0 }): Promise<EventOutcome> {
+  private async applyOne(t: TenantContext, me: Principal, ev: DeviceEventIn, opts: ApplyOpts, batch: BatchState = { conflicts: 0, suppressed: 0 }): Promise<EventOutcome> {
     const prior = await t.db.query<{ result: string; reason: string | null }>('SELECT result, reason FROM device_events WHERE id = $1', [ev.id]);
     if (prior.rows[0]) return { eventId: ev.id, result: 'duplicate', reason: prior.rows[0].result };
     const now = this.clock.now();
     let at = Date.parse(ev.occurredAt);
     let approximate = !!ev.approximate;
-    const c: EvCtx = { t, me, ev, at, approximate, clamped: false, deviceId: me.sessionId, now, flagged: false, batch };
+    const recovery = opts.recovery;
+    const c: EvCtx = { t, me, ev, at, approximate, clamped: false, deviceId: me.sessionId, now, flagged: false, batch, recoveredBy: recovery?.by ?? null };
     try {
       if (!Number.isFinite(at)) throw new Reject('INVALID_TIME');
       if (at > now + MAX_FUTURE_SKEW_MS) {
@@ -232,8 +265,14 @@ export class SyncService {
         approximate = true;
         c.clamped = true;
       }
-      if (at < now - MAX_EVENT_AGE_MS) throw new Reject('EVENT_TOO_OLD');
-      if (opts.revokedAt !== undefined) {
+      if (recovery) {
+        // ق40: strictly before the suspension; applied, flagged and listed for manager review.
+        const refused = recoveryTimeCheck(at, recovery.suspendedAt, now);
+        if (refused) throw new Reject(refused);
+        c.flagged = true;
+      } else if (at < now - MAX_EVENT_AGE_MS) {
+        throw new Reject('EVENT_TOO_OLD');
+      } else if (opts.revokedAt !== undefined) {
         // Design §6.5: events before the account was stopped are accepted and flagged; later ones are refused.
         if (at > opts.revokedAt) throw new Reject('ACCOUNT_REVOKED', true);
         c.flagged = true;
@@ -242,12 +281,31 @@ export class SyncService {
       c.approximate = approximate;
       const applied = await this.post.tx(t, async (q, effects) => {
         const r = await this.dispatch(q, effects, c);
+        // ق40: an L1 clamp (e.g. never before the booking existed) must not carry a recovered
+        // event past the suspension — the whole transaction is rolled back and it is refused.
+        if (recovery && c.at >= recovery.suspendedAt) throw new Reject(AFTER_SUSPENSION);
         await q.query(
-          `INSERT INTO device_events (id, staff_id, device_id, device_seq, type, booking_id, payload, occurred_at, approximate, result, reason, flagged)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'applied', $10, $11)`,
-          [ev.id, me.subjectId, c.deviceId, ev.deviceSeq, ev.type, ev.bookingId ?? null, JSON.stringify(ev.payload ?? {}), new Date(c.at), c.approximate, r.reason ?? null, !!(r.flagged || c.flagged)],
+          `INSERT INTO device_events (id, staff_id, device_id, device_seq, type, booking_id, payload, occurred_at, approximate, result, reason, flagged, recovered_by_staff_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'applied', $10, $11, $12)`,
+          [ev.id, me.subjectId, c.deviceId, ev.deviceSeq, ev.type, ev.bookingId ?? null, JSON.stringify(ev.payload ?? {}), new Date(c.at), c.approximate, r.reason ?? null, !!(r.flagged || c.flagged), c.recoveredBy],
         );
-        if (c.flagged && !r.flagged) {
+        if (recovery) {
+          // ق40: every recovered event waits for the manager's acknowledgement (review list).
+          await q.query('INSERT INTO sync_conflicts (staff_id, booking_id, device_event_id, kind, details) VALUES ($1, $2, $3, $4, $5)', [
+            me.subjectId,
+            ev.bookingId && (await loadBooking(q, ev.bookingId)) ? ev.bookingId : null,
+            ev.id,
+            'recovered_event',
+            JSON.stringify({
+              type: ev.type,
+              occurredAt: new Date(c.at).toISOString(),
+              approximate: c.approximate,
+              suspendedAt: new Date(recovery.suspendedAt).toISOString(),
+              recoveredBy: recovery.by,
+              ...(r.reason ? { reason: r.reason } : {}),
+            }),
+          ]);
+        } else if (c.flagged && !r.flagged) {
           await q.query('INSERT INTO sync_conflicts (staff_id, booking_id, device_event_id, kind, details) VALUES ($1, $2, $3, $4, $5)', [
             me.subjectId,
             ev.bookingId ?? null,
@@ -263,7 +321,8 @@ export class SyncService {
       if (isUniqueViolation(e)) return { eventId: ev.id, result: 'duplicate' };
       const code = e instanceof Reject ? e.code : e instanceof ApiError ? e.code : e instanceof z.ZodError ? 'INVALID_PAYLOAD' : null;
       if (!code) throw e;
-      await this.recordRejection(t, me, c, code, e instanceof Reject && e.flag);
+      // ق40: the manager recovering the events sees every rejection in the answer — no push alert.
+      await this.recordRejection(t, me, c, code, e instanceof Reject && e.flag && !c.recoveredBy);
       return { eventId: ev.id, result: 'rejected', reason: code };
     }
   }
@@ -271,8 +330,8 @@ export class SyncService {
   private async recordRejection(t: TenantContext, me: Principal, c: EvCtx, code: string, notifyManagers: boolean): Promise<void> {
     await this.post.tx(t, async (q, effects) => {
       const ins = await q.query(
-        `INSERT INTO device_events (id, staff_id, device_id, device_seq, type, booking_id, payload, occurred_at, approximate, result, reason, flagged)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'rejected', $10, true) ON CONFLICT (id) DO NOTHING`,
+        `INSERT INTO device_events (id, staff_id, device_id, device_seq, type, booking_id, payload, occurred_at, approximate, result, reason, flagged, recovered_by_staff_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'rejected', $10, true, $11) ON CONFLICT (id) DO NOTHING`,
         [
           c.ev.id,
           me.subjectId,
@@ -284,9 +343,12 @@ export class SyncService {
           new Date(Number.isFinite(c.at) ? c.at : c.now),
           c.approximate,
           code,
+          c.recoveredBy,
         ],
       );
       if (!ins.rowCount) return;
+      // ق40: an event after the suspension is simply not applied (reported to the manager uploading it).
+      if (c.recoveredBy && code === AFTER_SUSPENSION) return;
       if (c.batch.conflicts >= MAX_CONFLICTS_PER_BATCH) {
         c.batch.suppressed++;
         return;
@@ -393,6 +455,7 @@ export class SyncService {
       deviceSeq: c.ev.deviceSeq,
       approximate: c.approximate,
       reason,
+      recoveredBy: c.recoveredBy,
     });
   }
 
@@ -627,7 +690,7 @@ export class SyncService {
     await this.event(q, c, row.id, 'payment_confirmed', { amount: confirmed, expected, discrepancy });
     await writeAudit(q, {
       actorKind: 'staff', actorId: c.me.subjectId, action: 'payment.confirmed', targetKind: 'booking', targetId: row.id,
-      details: { amount: confirmed, expected, discrepancy, viaDevice: true },
+      details: { amount: confirmed, expected, discrepancy, viaDevice: true, ...recovered(c) },
     });
     await emitChange(q, effects, {
       staffId: row.staff_id,
@@ -707,7 +770,7 @@ export class SyncService {
     );
     await this.commit(q, ctx, remove(ctx.queue, row.id), 'cancelled_ahead', [row.id], effects, c);
     await this.event(q, c, row.id, 'closing_decision', { decision, reason: why }, 'closing');
-    await writeAudit(q, { actorKind: 'staff', actorId: c.me.subjectId, action: 'booking.cancelled', targetKind: 'booking', targetId: row.id, details: { by: 'staff', reason: 'closing' } });
+    await writeAudit(q, { actorKind: 'staff', actorId: c.me.subjectId, action: 'booking.cancelled', targetKind: 'booking', targetId: row.id, details: { by: 'staff', reason: 'closing', ...recovered(c) } });
     await this.notifications.toCustomer(q, effects, row.customer_id, { type: 'cancelled_closing', bookingId: row.id, text: Texts.cancelledClosing(why) });
     await emitBooking(q, ctx, row.id, 'booking_removed', effects);
     return {};
@@ -760,7 +823,7 @@ export class SyncService {
     );
     await q.query("UPDATE barber_days SET state = 'absent', updated_at = now() WHERE id = $1", [ctx.dayRow!.id]);
     await this.event(q, c, null, 'absent_today', { workDate: ctx.shift.workDate, reason: reason ?? null });
-    await writeAudit(q, { actorKind: 'staff', actorId: c.me.subjectId, action: 'staff.absent_reported', targetKind: 'staff', targetId: c.me.subjectId, details: { workDate: ctx.shift.workDate } });
+    await writeAudit(q, { actorKind: 'staff', actorId: c.me.subjectId, action: 'staff.absent_reported', targetKind: 'staff', targetId: c.me.subjectId, details: { workDate: ctx.shift.workDate, ...recovered(c) } });
     await emitChange(q, effects, { staffId: c.me.subjectId, type: 'day_state', entity: 'barber_day', data: { workDate: ctx.shift.workDate, state: stateWire({ kind: 'absent' }) } });
     const open = ctx.queue.filter((e) => !e.offer && e.status !== 'in_service').length;
     await this.notifications.toManagers(q, effects, {
@@ -770,6 +833,54 @@ export class SyncService {
       data: { barberId: c.me.subjectId },
     });
     return {};
+  }
+
+  // ─── ق40: recovery by a manager ────────────────────────────────────────────────────
+
+  /**
+   * ق40: a manager uploads, from the device of a SUSPENDED staff account, the events still in its
+   * outbox. They are attributed to that account (ownership checks, actor, device events) and go
+   * through the same state machine, once per event id; the device is the manager's session on it.
+   * Only events whose corrected device time is strictly before the suspension are applied — flagged,
+   * marked `recovered_by_staff_id` and listed for review; later ones are reported, not applied.
+   * One audit entry summarises the upload.
+   */
+  async recoverBatch(
+    t: TenantContext,
+    manager: Principal,
+    target: { id: string; role: 'barber' | 'manager'; suspendedAt: Date },
+    events: DeviceEventIn[],
+    ip: string | null,
+  ): Promise<RecoveryResponse> {
+    const as: Principal = { salonId: t.salonId, subjectId: target.id, role: target.role, sessionId: manager.sessionId };
+    const suspendedAt = target.suspendedAt.getTime();
+    const raw = await this.applyBatch(t, as, events, { recovery: { by: manager.subjectId, suspendedAt } });
+    // A retry: tell the manager what happened to the event the first time.
+    const dupIds = raw.filter((o) => o.result === 'duplicate').map((o) => o.eventId);
+    const prior = new Map<string, { result: string; reason: string | null }>();
+    if (dupIds.length) {
+      const { rows } = await t.db.query<{ id: string; result: string; reason: string | null }>(
+        'SELECT id, result, reason FROM device_events WHERE id = ANY($1::uuid[])',
+        [dupIds],
+      );
+      for (const r of rows) prior.set(r.id, r);
+    }
+    const { results, summary } = recoveryOutcomes(raw, prior);
+    await writeAudit(t, {
+      actorKind: 'staff',
+      actorId: manager.subjectId,
+      action: 'staff.events_recovered',
+      targetKind: 'staff',
+      targetId: target.id,
+      ip,
+      details: {
+        suspendedAt: target.suspendedAt.toISOString(),
+        total: events.length,
+        summary,
+        appliedEventIds: results.filter((x) => x.result === 'applied').map((x) => x.eventId),
+      },
+    });
+    return { staffId: target.id, suspendedAt: target.suspendedAt.toISOString(), results, summary };
   }
 
   // ─── Pull ──────────────────────────────────────────────────────────────────────────
@@ -797,6 +908,53 @@ export class SyncService {
       serverTime: new Date(this.clock.now()).toISOString(),
     };
   }
+}
+
+/**
+ * ق40: why a recovered event's (corrected) device time is refused, or null. It must be strictly
+ * before the suspension, and — like a normal push — at most 48 h old, measured from the moment it
+ * could last have been sent (the suspension, or now if earlier).
+ */
+export function recoveryTimeCheck(at: number, suspendedAt: number, now: number): string | null {
+  if (at >= suspendedAt) return AFTER_SUSPENSION;
+  if (at < Math.min(now, suspendedAt) - MAX_EVENT_AGE_MS) return 'EVENT_TOO_OLD';
+  return null;
+}
+
+/**
+ * ق40: maps the sync outcomes of a recovery upload to its per-event results. A duplicate (retry)
+ * reports what happened to the event the first time (`prior` = its device_events row).
+ */
+export function recoveryOutcomes(
+  raw: EventOutcome[],
+  prior: Map<string, { result: string; reason: string | null }>,
+): Pick<RecoveryResponse, 'results' | 'summary'> {
+  const classify = (reason: string | null | undefined): RecoveryResult =>
+    reason === AFTER_SUSPENSION ? 'rejected_after_suspension' : 'rejected_invalid';
+  const results: RecoveryOutcome[] = raw.map((o) => {
+    if (o.result === 'duplicate') {
+      const p = prior.get(o.eventId);
+      if (!p || p.result !== 'rejected') return { eventId: o.eventId, result: 'duplicate' };
+      return { eventId: o.eventId, result: classify(p.reason), ...(p.reason ? { reason: p.reason } : {}) };
+    }
+    if (o.result === 'applied') return { eventId: o.eventId, result: 'applied', ...(o.reason ? { reason: o.reason } : {}) };
+    return { eventId: o.eventId, result: classify(o.reason), ...(o.reason ? { reason: o.reason } : {}) };
+  });
+  const count = (r: RecoveryResult) => results.filter((x) => x.result === r).length;
+  return {
+    results,
+    summary: {
+      applied: count('applied'),
+      duplicate: count('duplicate'),
+      rejectedAfterSuspension: count('rejected_after_suspension'),
+      rejectedInvalid: count('rejected_invalid'),
+    },
+  };
+}
+
+/** ق40: audit details marker for an event recovered by a manager. */
+function recovered(c: EvCtx): Record<string, unknown> {
+  return c.recoveredBy ? { recoveredByManager: c.recoveredBy } : {};
 }
 
 function isUuid(v: unknown): v is string {
