@@ -116,11 +116,11 @@ class _GalleryScaffold extends StatelessWidget {
           const _Section(title: 'المجموعة المقسّمة', child: _SegmentedDemo()),
           const _Section(title: 'شرائح الخدمات', child: _ServiceChipsDemo()),
           const _Section(title: 'شارات الحالة', child: _StatusBadgesDemo()),
-          _Section(
+          const _Section(
             title: 'الصور الرمزية',
             child: Wrap(
               spacing: SaloniSpacing.space3,
-              children: const [
+              children: [
                 SaloniAvatar(name: 'محمد العتيبي'),
                 SaloniAvatar(name: 'خالد', tone: SaloniAvatarTone.steel),
                 SaloniAvatar(name: 'سارة القحطاني', size: 56),
@@ -128,10 +128,10 @@ class _GalleryScaffold extends StatelessWidget {
             ),
           ),
           const _Section(title: 'اختيار الحلاق', child: _BarberOptionsDemo()),
-          _Section(
+          const _Section(
             title: 'بطاقة الوقت المتوقع',
             child: Column(
-              children: const [
+              children: [
                 EtaCard(
                   eta: '10:40',
                   barber: 'خالد',
@@ -160,10 +160,10 @@ class _GalleryScaffold extends StatelessWidget {
               note: 'يشمل استراحة الحلاق القادمة',
             ),
           ),
-          _Section(
+          const _Section(
             title: 'عناصر الطابور',
             child: Column(
-              children: const [
+              children: [
                 QueueItem(
                   position: 1,
                   name: 'محمد العتيبي',
@@ -233,10 +233,10 @@ class _GalleryScaffold extends StatelessWidget {
               ],
             ),
           ),
-          _Section(
+          const _Section(
             title: 'الإشعارات',
             child: Column(
-              children: const [
+              children: [
                 SaloniBanner(title: 'معلومة', body: 'سيصلك تنبيه عندما يقترب دورك.'),
                 SizedBox(height: SaloniSpacing.space2),
                 SaloniBanner(
@@ -293,10 +293,10 @@ class _GalleryScaffold extends StatelessWidget {
               ),
             ),
           ),
-          _Section(
+          const _Section(
             title: 'إحصاءات',
             child: Row(
-              children: const [
+              children: [
                 Expanded(
                   child: StatTile(
                     label: 'الإيراد اليوم',
@@ -321,10 +321,10 @@ class _GalleryScaffold extends StatelessWidget {
             ),
           ),
           const _Section(title: 'حالة فارغة', child: _EmptyStateDemo()),
-          _Section(
+          const _Section(
             title: 'الكتالوج',
             child: Column(
-              children: const [
+              children: [
                 CatalogItem(
                   kind: SaloniCatalogKind.service,
                   name: 'حلاقة شعر ولحية',
@@ -471,9 +471,9 @@ class _SegmentedDemo extends StatelessWidget {
   const _SegmentedDemo();
   @override
   Widget build(BuildContext context) {
-    return SaloniSegmentedControl(
+    return const SaloniSegmentedControl(
       label: 'العرض',
-      options: const [
+      options: [
         SaloniSegmentedOption(value: 'today', label: 'اليوم'),
         SaloniSegmentedOption(value: 'week', label: 'الأسبوع'),
       ],
@@ -485,8 +485,8 @@ class _ServiceChipsDemo extends StatelessWidget {
   const _ServiceChipsDemo();
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: const [
+    return const Column(
+      children: [
         ServiceChip(name: 'حلاقة شعر ولحية', minutes: 45, price: '60', selected: true),
         SizedBox(height: SaloniSpacing.space2),
         ServiceChip(name: 'حلاقة شعر فقط', minutes: 25, price: '35'),
@@ -511,8 +511,8 @@ class _BarberOptionsDemo extends StatelessWidget {
   const _BarberOptionsDemo();
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: const [
+    return const Column(
+      children: [
         BarberOption(fastest: true, nextAt: '10:40', wait: 'الآن'),
         SizedBox(height: SaloniSpacing.space2),
         BarberOption(name: 'خالد', nextAt: '11:00', wait: 'خلال 20 دقيقة', selected: true),

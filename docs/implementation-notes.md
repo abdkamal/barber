@@ -19,3 +19,8 @@
 - مفتاح منع التكرار أيضًا على `quote` و`transfer`.
 - WebSocket للطاقم غير منفذ بعد؛ المزامنة الدورية كل 30 ث تعمل.
 - تشفير SQLCipher منفذ لكنه **غير مجرّب على جهاز** — يُختبر في المرحلة 11.
+
+## نظام التصميم في Flutter (`packages/saloni_ui`)
+- الأيقونات: حزمة `phosphor_flutter` لا تعمل مع Flutter 3.47 (تغيّر في `IconData`)، فاستُخدمت `phosphor_icons` 3.0.1 — نسخة مُصانة بالواجهة والأسماء نفسها.
+- الخطوط (El Messiri، IBM Plex Sans Arabic، IBM Plex Mono) مضمّنة كملفات TTF مع تراخيص OFL.
+- اختبار يطابق كل قيمة في `tokens.json` مع ثوابت Dart؛ 44 اختبار مكونات بما فيها RTL على عرض 360 وتكبير النص 1.3.
