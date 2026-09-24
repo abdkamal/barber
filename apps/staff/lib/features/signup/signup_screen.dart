@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:saloni_ui/saloni_ui.dart';
 
 import '../../core/format.dart';
+import '../../core/raw_api.dart';
 import '../../state/app_services.dart';
 import '../common/ui.dart';
 
@@ -127,28 +128,24 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       );
       // ساعات العمل والخدمات تُحفظ بجلسة المدير الجديدة (أفضل جهد).
       final cur = Currency.of(currency.$1);
-      try {
-        await services.api.updateManagerProfile({
-          'hours': [
-            for (final d in _days)
-              {
-                'weekday': d.weekday,
-                'closed': !d.open,
-                if (d.open) 'open': wireTime(d.from),
-                if (d.open) 'close': wireTime(d.to),
-              },
-          ],
-        });
-      } catch (_) {
-        _followUpFailures.add('ساعات العمل');
+      // ساعات الصالون = دوام افتراضي لكل يوم (staffId: null) يظهر للزبائن.
+      for (final d in _days.where((d) => d.open)) {
+        try {
+          await services.raw.putSchedule(
+            weekday: serverWeekday(d.weekday),
+            opensAt: wireTime(d.from),
+            closesAt: wireTime(d.to),
+          );
+        } catch (_) {
+          if (!_followUpFailures.contains('ساعات العمل')) _followUpFailures.add('ساعات العمل');
+        }
       }
       for (final s in _services) {
         try {
           await services.api.createManagerService({
             'name': s.name,
-            'baseDurationMin': s.minutes,
-            'priceCents': cur.parse(s.priceText) ?? 0,
-            'active': true,
+            'durationMinutes': s.minutes,
+            'price': cur.parse(s.priceText) ?? 0,
           });
         } catch (_) {
           if (!_followUpFailures.contains('الخدمات')) _followUpFailures.add('الخدمات');

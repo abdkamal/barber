@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saloni_api/saloni_api.dart' as sa;
 import 'package:saloni_ui/saloni_ui.dart';
 
+import '../../core/config.dart';
 import '../../core/format.dart';
 import '../../state/app_services.dart';
 import '../common/ui.dart';
@@ -141,3 +142,36 @@ Future<void> showOneTimeCode(BuildContext context, String who, String code, {Str
     );
   });
 }
+
+/// رابط صورة مخزنة: `salonId/file` ← `{base}/v1/media/{code}/{file}`.
+String mediaUrl(String path, String salonCode) {
+  if (path.startsWith('http')) return path;
+  var base = AppConfig.apiBaseUrl;
+  if (base.endsWith('/')) base = base.substring(0, base.length - 1);
+  final i = path.lastIndexOf('/');
+  final file = i >= 0 ? path.substring(i + 1) : path;
+  return '$base/v1/media/$salonCode/$file';
+}
+
+/// «يوميًا» أو التاريخ لاستراحة/فترة من `GET /manager/breaks`.
+String breakWhen(Map<String, dynamic> b) =>
+    b['recurring'] == true || str(b, ['workDate']).isEmpty ? 'يوميًا' : digits(str(b, ['workDate']));
+
+/// «4:00 م – 6:00 م».
+String breakTimes(Map<String, dynamic> b) {
+  if (str(b, ['startTime']).isNotEmpty) {
+    return '${displayWireTime(str(b, ['startTime']))} – ${displayWireTime(str(b, ['endTime']))}';
+  }
+  final s = DateTime.tryParse(str(b, ['startsAt']));
+  final e = DateTime.tryParse(str(b, ['endsAt']));
+  if (s == null || e == null) return '—';
+  return '${timeAr(s)} – ${timeAr(e)}';
+}
+
+String breakTypeAr(String t) => switch (t) {
+      'rest' => 'راحة',
+      'prayer' => 'صلاة',
+      'emergency' => 'طارئة',
+      'walk_in_only' => 'حاضرون فقط',
+      _ => t,
+    };

@@ -10,6 +10,7 @@ import '../core/platform/device_services.dart';
 import '../core/platform/push.dart';
 import '../core/platform/storage.dart';
 import '../core/prefs.dart';
+import '../core/raw_api.dart';
 import '../data/barber_repository.dart';
 import '../data/models.dart';
 
@@ -18,6 +19,7 @@ class AppServices {
   AppServices({
     required this.api,
     required this.compat,
+    required this.raw,
     required this.storage,
     required this.device,
     required this.push,
@@ -27,6 +29,7 @@ class AppServices {
 
   final sa.ApiClient api;
   final CompatHttpClient compat;
+  final RawApi raw;
   final StoragePlatform storage;
   final DeviceServices device;
   final PushService push;
@@ -64,6 +67,7 @@ class AppServices {
     return AppServices(
       api: api,
       compat: compat,
+      raw: RawApi(api: api, http_: compat, baseUrl: baseUrl),
       storage: storage,
       device: device,
       push: push,

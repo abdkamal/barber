@@ -179,7 +179,7 @@ class QueueEntry {
       walkIn: b.walkIn || b.source == sa.BookingSource.barber,
       position: b.queuePosition ?? 0,
       pastClosing: r['pastClosing'] == true,
-      closingDecided: r['closingDecision'] != null,
+      closingDecided: r['closingDecision'] != null || r['serveLate'] == true,
       payment: payStatus is String ? _payment(payStatus) : null,
       source: b.source,
       createdAt: b.createdAt,
@@ -299,21 +299,50 @@ class ImpactPreview {
   List<ImpactEntry> get pastClosing => items.where((i) => i.pastClosing).toList();
   List<ImpactEntry> get notified => items.where((i) => i.notify).toList();
 
-  /// تحليل متسامح لشكل الاستجابة (api.md لا يفصّله).
+  /// تحليل استجابة `POST /staff/impact`: `{changes[], pastClosing[], newDurationMin,
+  /// newPriceCents, workEnd}` (مع قبول أشكال بديلة احتياطًا).
   factory ImpactPreview.fromJson(Object? json) {
     final list = json is List
         ? json
         : (json is Map
-            ? (json['items'] ?? json['affected'] ?? json['impact'] ?? const [])
+            ? (json['changes'] ?? json['items'] ?? json['affected'] ?? const [])
             : const []);
     final items = <ImpactEntry>[];
     for (final e in (list as List)) {
       if (e is Map) items.add(ImpactEntry.fromJson(Map<String, dynamic>.from(e)));
     }
+    // من سيتجاوز الإغلاق دون أن يتغيّر وقته (ق24) — يُضاف ليُتخذ قرار بشأنه.
+    final past = json is Map && json['pastClosing'] is List ? json['pastClosing'] as List : const [];
+    for (final p in past) {
+      if (p is! Map) continue;
+      final id = (p['bookingId'] ?? '').toString();
+      final idx = items.indexWhere((i) => i.bookingId == id);
+      if (idx >= 0) {
+        final i = items[idx];
+        items[idx] = ImpactEntry(
+          bookingId: i.bookingId,
+          name: i.name,
+          from: i.from,
+          to: i.to,
+          deltaMin: i.deltaMin,
+          notify: i.notify,
+          pastClosing: true,
+        );
+      } else {
+        items.add(ImpactEntry(
+          bookingId: id,
+          name: (p['customerName'] ?? 'زبون').toString(),
+          to: _date(p['end']),
+          deltaMin: 0,
+          notify: false,
+          pastClosing: true,
+        ));
+      }
+    }
     return ImpactPreview(
       items: items,
-      newDurationMin: json is Map ? _int(json['durationMin'] ?? json['newDurationMin']) : null,
-      newPriceCents: json is Map ? _int(json['priceCents'] ?? json['newPriceCents'] ?? json['amountCents']) : null,
+      newDurationMin: json is Map ? _int(json['newDurationMin'] ?? json['durationMin']) : null,
+      newPriceCents: json is Map ? _int(json['newPriceCents'] ?? json['priceCents']) : null,
     );
   }
 }

@@ -26,7 +26,7 @@ import {
   type StaffInfo,
   staffInfo,
 } from './rows';
-import { currentShift, dailyBreakInShift, localToUtc, addDays, type ScheduleRow, type Shift, shiftOn } from './time';
+import { addDays, currentShift, dailyBreakInShift, localToUtc, type ScheduleRow, type Shift, shiftOn, weekday } from './time';
 
 /** Heartbeats every 30 s; the barber is considered disconnected after 90 s without one (design §11). */
 export const HEARTBEAT_TIMEOUT_MS = 90_000;
@@ -53,16 +53,33 @@ export class Effects {
 
 // ─── Schedules & shifts ──────────────────────────────────────────────────────────────
 
+/**
+ * Effective weekly hours: the staff member's own row for a weekday, else the salon-wide default
+ * row (staff_id NULL, migration 003) — defaults apply to barbers only; a manager who also serves
+ * customers needs his own rows.
+ */
+const EFFECTIVE_SCHEDULES = `
+  SELECT s.id AS staff_id, w.weekday, w.opens_at::text AS opens_at, w.closes_at::text AS closes_at
+    FROM staff s
+    JOIN work_schedules w
+      ON w.staff_id = s.id
+      OR (w.staff_id IS NULL AND s.role = 'barber'
+          AND NOT EXISTS (SELECT 1 FROM work_schedules o WHERE o.staff_id = s.id AND o.weekday = w.weekday))
+   WHERE s.active`;
+
 export async function schedulesOf(q: TenantQueryable, staffId: string): Promise<ScheduleRow[]> {
-  const { rows } = await q.query<ScheduleRow>(
-    'SELECT weekday, opens_at::text AS opens_at, closes_at::text AS closes_at FROM work_schedules WHERE staff_id = $1',
-    [staffId],
-  );
+  const { rows } = await q.query<ScheduleRow>(`${EFFECTIVE_SCHEDULES} AND s.id = $1`, [staffId]);
   return rows;
 }
 
 export async function resolveShift(q: TenantQueryable, tz: string, staffId: string, now: number, lookaheadMs: number): Promise<Shift | null> {
   return currentShift(await schedulesOf(q, staffId), tz, now, lookaheadMs);
+}
+
+/** Opening time (local) of a staff member's shift on a date — anchors recurring breaks (ق30). */
+export async function opensAtOn(q: TenantQueryable, staffId: string, date: string): Promise<string | null> {
+  const wd = weekday(date);
+  return (await schedulesOf(q, staffId)).find((r) => r.weekday === wd)?.opens_at ?? null;
 }
 
 /** The shift of a known work date (for events arriving late); falls back to the whole local day. */
@@ -73,23 +90,17 @@ export async function shiftForDate(q: TenantQueryable, tz: string, staffId: stri
 
 /** Active staff who work (have a schedule on) the current business day — the salon's "barbers" today. */
 export async function workingStaff(q: TenantQueryable): Promise<Array<StaffInfo & { schedules: ScheduleRow[] }>> {
-  const { rows } = await q.query<StaffInfo & { weekday: number | null; opens_at: string | null; closes_at: string | null }>(
-    `SELECT s.id, s.name, s.role, s.active, s.call_ahead_minutes, s.created_at,
-            w.weekday, w.opens_at::text AS opens_at, w.closes_at::text AS closes_at
-       FROM staff s JOIN work_schedules w ON w.staff_id = s.id
-      WHERE s.active
-      ORDER BY s.created_at, s.id`,
+  const { rows: staff } = await q.query<StaffInfo>(
+    'SELECT id, name, role, active, call_ahead_minutes, created_at FROM staff WHERE active ORDER BY created_at, id',
   );
-  const by = new Map<string, StaffInfo & { schedules: ScheduleRow[] }>();
+  const { rows } = await q.query<ScheduleRow & { staff_id: string }>(EFFECTIVE_SCHEDULES);
+  const by = new Map<string, ScheduleRow[]>();
   for (const r of rows) {
-    let s = by.get(r.id);
-    if (!s) {
-      s = { id: r.id, name: r.name, role: r.role, active: r.active, call_ahead_minutes: r.call_ahead_minutes, created_at: r.created_at, schedules: [] };
-      by.set(r.id, s);
-    }
-    if (r.weekday !== null) s.schedules.push({ weekday: r.weekday, opens_at: r.opens_at!, closes_at: r.closes_at! });
+    const list = by.get(r.staff_id) ?? [];
+    list.push({ weekday: r.weekday, opens_at: r.opens_at, closes_at: r.closes_at });
+    by.set(r.staff_id, list);
   }
-  return [...by.values()];
+  return staff.filter((s) => by.has(s.id)).map((s) => ({ ...s, schedules: by.get(s.id)! }));
 }
 
 // ─── Day context ──────────────────────────────────────────────────────────────────────
@@ -222,11 +233,7 @@ export async function loadDay(
   const staff = opts.staff ?? (await staffInfo(q, staffId));
   if (!staff) throw new Error('staff not found');
   const { rows: abs } = await q.query('SELECT 1 FROM absences WHERE staff_id = $1 AND work_date = $2', [staffId, shift.workDate]);
-  const { rows: sched } = await q.query<{ opens_at: string }>(
-    `SELECT opens_at::text AS opens_at FROM work_schedules WHERE staff_id = $1 AND weekday = EXTRACT(DOW FROM $2::date)`,
-    [staffId, shift.workDate],
-  );
-  const breaks = await loadBreaks(q, salon.timezone, staffId, shift, sched[0]?.opens_at ?? null, now);
+  const breaks = await loadBreaks(q, salon.timezone, staffId, shift, await opensAtOn(q, staffId, shift.workDate), now);
   const { rows } = await q.query<BookingRow>(
     `${BOOKING_SELECT}
       WHERE b.staff_id = $1 AND b.work_date = $2 AND b.status IN ('offered', 'waiting', 'called', 'in_service')

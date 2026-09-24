@@ -45,7 +45,8 @@ class MoreScreen extends ConsumerWidget {
 
 /// تفضيلات التطبيق والحساب — مشتركة بين «المزيد» وإعدادات المدير.
 class AppPreferencesSection extends ConsumerWidget {
-  const AppPreferencesSection({super.key});
+  const AppPreferencesSection({super.key, this.showDigits = true});
+  final bool showDigits;
 
   Future<void> _logout(BuildContext context, WidgetRef ref) async {
     final repoPending = ref.exists(barberRepoProvider) ? ref.read(barberRepoProvider).pending : 0;
@@ -80,7 +81,7 @@ class AppPreferencesSection extends ConsumerWidget {
             ],
             onChanged: (v) => prefs.setThemeMode(v == 'light' ? ThemeMode.light : ThemeMode.dark),
           ),
-          ClipRRect(
+          if (showDigits) ClipRRect(
             borderRadius: SaloniRadius.lgAll,
             child: SettingSwitch(
               label: 'الأرقام العربية المشرقية',

@@ -146,9 +146,9 @@ class _BarberQueue extends StatelessWidget {
             name: str(active[i], ['customerName', 'name'], 'زبون'),
             services: servicesText(active[i]),
             eta: etaText(active[i]),
-            duration: intOf(active[i], ['durationMin']) == null
+            duration: intOf(active[i], ['estimatedDurationMin', 'durationMin']) == null
                 ? null
-                : minutesAr(intOf(active[i], ['durationMin'])!),
+                : minutesAr(intOf(active[i], ['estimatedDurationMin', 'durationMin'])!),
             status: uiStatus(statusOf(active[i])),
             walkIn: active[i]['walkIn'] == true,
             requested: active[i]['kind'] == 'requested',

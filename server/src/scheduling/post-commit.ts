@@ -44,6 +44,6 @@ export class PostCommit {
       this.bus.publish({ salonId: t.salonId, staffIds: [...effects.staff], seq });
     }
     if (effects.notifications) void this.notifications.dispatch(t);
-    for (const p of this.pokers) p(t.salonId);
+    if (effects.staff.size || effects.notifications) for (const p of this.pokers) p(t.salonId);
   }
 }

@@ -169,6 +169,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     if (repo.loadError != null) {
       children.add(SaloniBanner(tone: SaloniBannerTone.danger, body: repo.loadError));
     }
+    if (repo.noShiftToday && !repo.absentToday) {
+      children.add(const SaloniBanner(
+        tone: SaloniBannerTone.info,
+        title: 'لا دوام لك اليوم',
+        body: 'لا يُحجز عندك اليوم وفق جدول الدوام. راجع المدير إن كان هذا غير صحيح.',
+      ));
+    }
     if (repo.absentToday) {
       children.add(const SaloniBanner(
         tone: SaloniBannerTone.info,

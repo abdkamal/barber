@@ -322,6 +322,9 @@ export class SyncService {
       const entry: QueueEntry = { ...toEntry(row), status: 'waiting', offer: false };
       queue = insertAt(queue, queue.filter((e) => e.status !== 'waiting').length, entry);
       await q.query('UPDATE bookings SET cancelled_at = NULL, needs_review = true WHERE id = $1', [row.id]);
+      if (row.status === 'no_show') {
+        await q.query('UPDATE customers SET no_show_count = GREATEST(0, no_show_count - 1), updated_at = now() WHERE id = $1', [row.customer_id]);
+      }
       ctx.byId.set(row.id, row);
     }
     const current = queue.find((e) => e.status === 'in_service');

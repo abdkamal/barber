@@ -20,6 +20,7 @@ import {
   emitChange,
   estimateFor,
   loadDay,
+  opensAtOn,
   project,
   releaseExpiredOffers,
   resolveShift,
@@ -76,15 +77,12 @@ export class StaffDayService {
         WHERE b.staff_id = $1 AND (b.work_date IS NULL OR (b.starts_at < $3 AND (b.ends_at > $2 OR b.open)))`,
       [staffId, new Date(shift.workStart), new Date(shift.workEnd)],
     );
-    const { rows: sched } = await q.query<{ opens_at: string }>(
-      'SELECT opens_at::text AS opens_at FROM work_schedules WHERE staff_id = $1 AND weekday = EXTRACT(DOW FROM $2::date)',
-      [staffId, shift.workDate],
-    );
+    const opensAt = (await opensAtOn(q, staffId, shift.workDate)) ?? '00:00';
     return rows
       .map((b) => {
         const iv =
           b.work_date === null
-            ? dailyBreakInShift(shift, b.start_time!, b.end_time!, tz, sched[0]?.opens_at ?? '00:00')
+            ? dailyBreakInShift(shift, b.start_time!, b.end_time!, tz, opensAt)
             : { start: b.starts_at!.getTime(), end: b.ends_at!.getTime() };
         return { id: b.id, kind: b.type, start: iso(iv.start)!, end: iso(iv.end)!, open: b.open, recurring: b.work_date === null };
       })

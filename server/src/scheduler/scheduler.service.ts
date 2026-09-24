@@ -53,6 +53,8 @@ export class SchedulerService implements OnApplicationBootstrap, OnApplicationSh
   private timer?: NodeJS.Timeout;
   private running = false;
   private stopped = false;
+  private active: string | null = null;
+  private pokedDuringRun = false;
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -81,6 +83,7 @@ export class SchedulerService implements OnApplicationBootstrap, OnApplicationSh
 
   poke(salonId: string): void {
     this.due.set(salonId, 0);
+    if (this.active === salonId) this.pokedDuringRun = true;
   }
 
   nextDue(salonId: string): number | undefined {
@@ -109,11 +112,17 @@ export class SchedulerService implements OnApplicationBootstrap, OnApplicationSh
         if ((this.due.get(s.id) ?? 0) > now) continue;
         const t = await this.resolver.fromVerifiedToken(s.id).catch(() => null);
         if (!t || t.salon.status !== 'active') continue;
+        this.active = s.id;
+        this.pokedDuringRun = false;
         try {
-          this.due.set(s.id, await this.runSalon(t));
+          const next = await this.runSalon(t);
+          // A change committed meanwhile (by a request or by this run) gets one more pass right away.
+          this.due.set(s.id, this.pokedDuringRun ? now + TICK_MS : next);
         } catch (e) {
           this.logger.warn(`salon ${t.salon.code}: ${(e as Error).message}`);
           this.due.set(s.id, now + 30_000);
+        } finally {
+          this.active = null;
         }
       }
     } catch (e) {

@@ -60,6 +60,9 @@ class BarberRepository extends ChangeNotifier {
   Map<String, dynamic> settings = const {};
   ActiveBreak? activeBreak;
   bool absentToday = false;
+
+  /// لا دوام لهذا الحلاق اليوم (`day: null` من السيرفر).
+  bool noShiftToday = false;
   List<PaymentView> serverPayments = const [];
 
   LinkStatus link = LinkStatus.syncing;
@@ -272,6 +275,29 @@ class BarberRepository extends ChangeNotifier {
         for (final r in rawQueue)
           if (r is Map && r['id'] != null) r['id'].toString(): Map<String, dynamic>.from(r),
       };
+      // ق24: حجوزات متوقعة بعد الإغلاق وتنتظر قرار الحلاق.
+      final warnings = raw is Map && raw['closingWarnings'] is List ? raw['closingWarnings'] as List : const [];
+      for (final id in warnings) {
+        rawById[id.toString()]?['pastClosing'] = true;
+      }
+      final day = raw is Map ? raw['day'] : null;
+      noShiftToday = raw is Map && raw.containsKey('day') && day == null;
+      if (day is Map && day['state'] == 'absent_today') absentToday = true;
+      // استراحة مفتوحة على السيرفر (بدأها الحلاق من جهاز آخر أو قبل إعادة التشغيل).
+      final rawBreaks = raw is Map && raw['breaks'] is List ? raw['breaks'] as List : const [];
+      final open = rawBreaks.whereType<Map>().where((b) => b['open'] == true).firstOrNull;
+      if (open != null && activeBreak == null) {
+        try {
+          activeBreak = ActiveBreak(
+            sa.BreakKind.fromWire(open['kind'].toString()),
+            DateTime.parse(open['start'].toString()),
+          );
+        } catch (_) {}
+      } else if (open == null && activeBreak != null) {
+        final pendingBreak = (await engine.store.getOutbox())
+            .any((o) => o.event.type == sa.DeviceEventType.breakStarted);
+        if (!pendingBreak) activeBreak = null;
+      }
       services = today.services;
       breaks = today.breaks;
       settings = today.settings;
@@ -491,8 +517,9 @@ class BarberRepository extends ChangeNotifier {
                 .toString(),
             amountCents: p.amountCents,
             status: p.status,
-            at: p.confirmedAt ??
-                entries.where((e) => e.id == p.bookingId).firstOrNull?.actualEnd,
+            at: DateTime.tryParse('${rawById[p.bookingId]?['finishedAt'] ?? ''}') ??
+                entries.where((e) => e.id == p.bookingId).firstOrNull?.actualEnd ??
+                p.confirmedAt,
           ),
       ];
       _notify();

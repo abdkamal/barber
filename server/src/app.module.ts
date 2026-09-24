@@ -6,6 +6,7 @@ import { APP_CONFIG, AppConfig } from './config/config';
 import { CustomersController } from './customers/customers.controller';
 import { DatabaseModule } from './db/database.module';
 import { HealthController } from './health/health.controller';
+import { QueueModule } from './queue.module';
 import { ProvisioningService } from './provisioning/provisioning.service';
 import { SalonsController } from './provisioning/salons.controller';
 import { RateLimitGuard } from './security/rate-limit.guard';
@@ -30,7 +31,7 @@ export class AppModule {
   static forRoot(config: AppConfig): DynamicModule {
     return {
       module: AppModule,
-      imports: [ConfigModule.forRoot(config), DatabaseModule, AuthModule],
+      imports: [ConfigModule.forRoot(config), DatabaseModule, AuthModule, QueueModule],
       controllers: [HealthController, SalonsController, StaffController, CustomersController, SettingsController],
       providers: [
         ProvisioningService,

@@ -18,7 +18,8 @@
     "vendor": "ts-node --transpile-only src/cli/vendor.ts",
     "test": "jest --config jest.config.js",
     "test:int": "jest --config jest.int.config.js --runInBand",
-    "prestart:dev": "npm run build:engine"
+    "prestart:dev": "npm run build:engine",
+    "pretest:int": "npm run build:engine"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",
