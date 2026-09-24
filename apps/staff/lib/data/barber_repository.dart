@@ -31,7 +31,9 @@ class BarberRepository extends ChangeNotifier {
     this.currency = const Currency('SAR', 'ر.س', 2),
     this.heartbeat = const Duration(seconds: 30),
     DateTime Function()? clock,
+    void Function()? onHandleReleased,
   })  : _openStore = openStore,
+        _onHandleReleased = onHandleReleased,
         _now = clock ?? DateTime.now;
 
   final sa.ApiClient api;
@@ -39,6 +41,10 @@ class BarberRepository extends ChangeNotifier {
   final Currency currency;
   final Duration heartbeat;
   final Future<LocalStoreHandle> Function() _openStore;
+
+  /// يُستدعى بعد إغلاق أو مسح مقبض القاعدة، ليُصفّر منسّق المقابض في
+  /// `AppServices` (`activeHandle`) — يمنع فتح مقبض ثانٍ متزامن لاحقًا.
+  final void Function()? _onHandleReleased;
   final DateTime Function() _now;
 
   LocalStoreHandle? _handle;
@@ -63,6 +69,11 @@ class BarberRepository extends ChangeNotifier {
   /// لا دوام لهذا الحلاق اليوم (`day: null` من السيرفر).
   bool noShiftToday = false;
   List<PaymentView> serverPayments = const [];
+
+  /// حجوزات `in_service` من يوم عمل سابق أُغلق قبل إنهائها (ق24) — من
+  /// `unfinishedFromPreviousDay` في `GET /staff/today`. تُعرض في قسم منفصل
+  /// أعلى «طابوري» وتُنهى/تُدفع عبر الصندوق مثل أي حجز آخر.
+  List<QueueEntry> unfinishedFromPreviousDay = const [];
 
   LinkStatus link = LinkStatus.syncing;
   DateTime? offlineSince;
@@ -192,7 +203,7 @@ class BarberRepository extends ChangeNotifier {
     if (engine != null) unawaited(engine.dispose());
     final h = _handle;
     _handle = null;
-    if (h != null) unawaited(h.close());
+    if (h != null) unawaited(h.close().whenComplete(() => _onHandleReleased?.call()));
     super.dispose();
   }
 
@@ -203,6 +214,7 @@ class BarberRepository extends ChangeNotifier {
     final h = _handle;
     _handle = null;
     if (h != null) await h.destroy();
+    _onHandleReleased?.call();
     await device.stopKeepAlive();
   }
 
@@ -222,6 +234,17 @@ class BarberRepository extends ChangeNotifier {
         for (final b in queue)
           QueueEntry.from(b, services,
               local: (details[b.id] as Map?)?.cast<String, dynamic>()),
+      ];
+      final prevDetails =
+          (app['previousDayDetails'] as Map?)?.cast<String, dynamic>() ?? const {};
+      final prevQueue = (app['previousDayQueue'] as List?) ?? const [];
+      unfinishedFromPreviousDay = [
+        for (final j in prevQueue)
+          QueueEntry.from(
+            sa.Booking.fromJson((j as Map).cast<String, dynamic>()),
+            services,
+            local: (prevDetails[(j)['id']] as Map?)?.cast<String, dynamic>(),
+          ),
       ];
       absentToday = app['absentToday'] == true;
       final br = app['activeBreak'];
@@ -247,6 +270,12 @@ class BarberRepository extends ChangeNotifier {
       ...settings,
       '_app': {
         'details': {for (final e in entries) e.id: e.extrasJson()},
+        'previousDayQueue': [
+          for (final e in unfinishedFromPreviousDay) e.toBooking().toJson(),
+        ],
+        'previousDayDetails': {
+          for (final e in unfinishedFromPreviousDay) e.id: e.extrasJson(),
+        },
         'absentToday': absentToday,
         if (activeBreak != null)
           'activeBreak': {
@@ -289,6 +318,9 @@ class BarberRepository extends ChangeNotifier {
       }
       // حالة محلية لا يرسلها السيرفر (قرار الإغلاق، الدفع المؤكد محليًا).
       final localById = {for (final e in entries) e.id: e.extrasJson()};
+      final localPrevById = {
+        for (final e in unfinishedFromPreviousDay) e.id: e.extrasJson(),
+      };
       services = today.services;
       breaks = today.breaks;
       settings = today.settings;
@@ -309,6 +341,16 @@ class BarberRepository extends ChangeNotifier {
         fresh = applyEvent(fresh, o.event, services, _now(), breaks: breaks, walkInOnly: walkInOnly);
       }
       entries = fresh;
+      // حجوزات يوم سابق أُغلق وما زالت `in_service` (ق24) — تُنهى وتُدفع عبر
+      // الصندوق مثل أي حجز آخر؛ إعادة تطبيق ما لم يُرسل بعد فوقها أيضًا.
+      var freshPrev = [
+        for (final b in today.unfinishedFromPreviousDay)
+          QueueEntry.from(b, services, local: localPrevById[b.id]),
+      ];
+      for (final o in outbox) {
+        freshPrev = applyEvent(freshPrev, o.event, services, _now());
+      }
+      unfinishedFromPreviousDay = freshPrev;
       pending = outbox.length;
       if (settings['absentToday'] == true) absentToday = true;
       loadError = null;
@@ -450,6 +492,37 @@ class BarberRepository extends ChangeNotifier {
   Future<void> confirmPayment(String bookingId, int amountCents) =>
       _record(sa.DeviceEventType.paymentConfirmed,
           bookingId: bookingId, payload: {'amount': amountCents});
+
+  // ---------------- حجوزات يوم سابق أُغلق (ق24) ----------------
+
+  /// «إنهاء الخدمة» لحجز `in_service` من يوم عمل سابق أُغلق قبل إنهائه —
+  /// نفس حدث الصندوق، لكنه يُطبَّق على [unfinishedFromPreviousDay] لا
+  /// [entries] (الحجز ليس في طابور اليوم الحالي).
+  Future<void> finishPreviousDayService(String bookingId) =>
+      _recordOnPreviousDay(sa.DeviceEventType.serviceFinished, bookingId);
+
+  /// «تأكيد الدفع» لحجز يوم سابق بعد إنهائه.
+  Future<void> confirmPreviousDayPayment(String bookingId, int amountCents) =>
+      _recordOnPreviousDay(sa.DeviceEventType.paymentConfirmed, bookingId,
+          payload: {'amount': amountCents});
+
+  Future<void> _recordOnPreviousDay(
+    sa.DeviceEventType type,
+    String bookingId, {
+    Map<String, dynamic> payload = const {},
+  }) async {
+    final engine = _engine;
+    if (engine == null) return;
+    final event = await engine.recordEvent(type, bookingId: bookingId, payload: payload);
+    unfinishedFromPreviousDay =
+        applyEvent(unfinishedFromPreviousDay, event, services, _now());
+    pending = await engine.outbox.pendingCount();
+    if (link == LinkStatus.online) {
+      unawaited(_flushSoon());
+    }
+    await _saveLocal();
+    _notify();
+  }
 
   Future<void> startBreak(sa.BreakKind kind) async {
     activeBreak = ActiveBreak(kind, _now());

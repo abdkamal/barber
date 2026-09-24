@@ -52,8 +52,17 @@ DateTime anchorRequestedTimeUtc({
 }) {
   final location = _location(timezoneName);
   if (workStartUtc == null) {
+    // «الأسرع» بلا حلاق محدد: لا دوام معروف لنثبّت عليه عبور منتصف الليل،
+    // فيُبنى الوقت على تاريخ اليوم الحالي بتوقيت الصالون أولًا؛ لكن إن وقع في
+    // الماضي (مثل صالون ليلي 16:00–02:00: طلب الساعة 01:00 والوقت الآن
+    // 23:00 — يوم اليوم 01:00 سبق بالفعل) يُنقل لليوم التالي، أي إلى **أقرب
+    // وقوع قادم** للساعة المطلوبة، فلا يصل السيرفر وقت في الماضي (I5).
     final now = tz.TZDateTime.from(nowUtc ?? DateTime.now().toUtc(), location);
-    return tz.TZDateTime(location, now.year, now.month, now.day, hour, minute).toUtc();
+    var candidate = tz.TZDateTime(location, now.year, now.month, now.day, hour, minute);
+    if (candidate.isBefore(now)) {
+      candidate = candidate.add(const Duration(days: 1));
+    }
+    return candidate.toUtc();
   }
 
   final start = tz.TZDateTime.from(workStartUtc, location);

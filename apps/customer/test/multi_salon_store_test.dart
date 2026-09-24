@@ -7,6 +7,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:saloni_api/saloni_api.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+Session _sessionFor(String code, String refreshToken) => Session(
+      accessToken: 'access-$code',
+      refreshToken: refreshToken,
+      role: UserRole.customer,
+      salon: SalonInfo(code: code, name: 'صالون $code', status: 'active', currency: 'SAR'),
+      account: const AccountInfo(id: 'c-1', name: 'سالم', status: 'active'),
+    );
+
 Session _session() => Session(
       accessToken: 'access',
       refreshToken: 'refresh-token-1',
@@ -83,5 +91,62 @@ void main() {
     );
     final restarted = freshStore();
     expect((await restarted.get('RAHA-27'))?.session.refreshToken, 'refresh-token-1');
+  });
+
+  test(
+      'L7 (متبقٍّ): صالونان — تجديد جلسة الصالون المتذكَّر لا يكتب رمز تجديد '
+      'الصالون غير المتذكَّر إلى القرص', () async {
+    final store = freshStore();
+
+    // صالون A: «الدخول تلقائيًا» مفعّل.
+    await store.upsert(
+      SalonSession(code: 'A-01', name: 'صالون أ', session: _sessionFor('A-01', 'a-refresh-1')),
+      rememberMe: true,
+    );
+    // صالون B: بلا «تذكّرني» — يبقى في الذاكرة فقط لهذا التشغيل.
+    await store.upsert(
+      SalonSession(code: 'B-02', name: 'صالون ب', session: _sessionFor('B-02', 'b-refresh-1')),
+      rememberMe: false,
+    );
+
+    // كلا الصالونين متاحان من الذاكرة في هذا التشغيل.
+    expect((await store.get('A-01'))?.session.refreshToken, 'a-refresh-1');
+    expect((await store.get('B-02'))?.session.refreshToken, 'b-refresh-1');
+
+    // صالون A يجدّد جلسته (رمز تجديد جديد) بينما B لا يزال في الذاكرة —
+    // يجب ألا يكتب هذا رمز B على القرص رغم أن كلا الصالونين في `_cache`.
+    await store.upsert(
+      SalonSession(code: 'A-01', name: 'صالون أ', session: _sessionFor('A-01', 'a-refresh-2')),
+      rememberMe: true,
+    );
+
+    final restarted = freshStore();
+    expect((await restarted.get('A-01'))?.session.refreshToken, 'a-refresh-2',
+        reason: 'صالون A متذكَّر ويحمل آخر رمز تجديد');
+    expect(await restarted.get('B-02'), isNull,
+        reason: 'رمز تجديد صالون B غير المتذكَّر يجب ألا يظهر على القرص أبدًا، '
+            'ولو تجدّدت جلسة صالون آخر');
+  });
+
+  test('L7 (متبقٍّ): remove() لا يكتب على القرص جلسة صالون آخر غير متذكَّر',
+      () async {
+    final store = freshStore();
+    await store.upsert(
+      SalonSession(code: 'A-01', name: 'صالون أ', session: _sessionFor('A-01', 'a-refresh-1')),
+      rememberMe: true,
+    );
+    await store.upsert(
+      SalonSession(code: 'B-02', name: 'صالون ب', session: _sessionFor('B-02', 'b-refresh-1')),
+      rememberMe: false,
+    );
+
+    // إزالة صالون A من هذا الجهاز (حساب انتهى مثلًا) تُعيد كتابة القرص —
+    // يجب ألا تُسرّب معها رمز تجديد B غير المتذكَّر.
+    await store.remove('A-01');
+
+    final restarted = freshStore();
+    expect(await restarted.get('A-01'), isNull);
+    expect(await restarted.get('B-02'), isNull,
+        reason: 'B لم يكن متذكَّرًا أصلًا — يجب ألا يظهر على القرص بعد remove() لصالون آخر');
   });
 }

@@ -75,6 +75,36 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
         serviceNames(e.serviceIds, repo.services));
   }
 
+  /// «إنهاء الخدمة» لحجز يوم سابق أُغلق (ق24) — عبر الصندوق مثل أي حجز آخر.
+  Future<void> _finishPreviousDay(QueueEntry e) async {
+    final repo = ref.read(barberRepoProvider);
+    await repo.finishPreviousDayService(e.id);
+    if (!mounted) return;
+    await showPaymentSheet(
+      context,
+      repo,
+      e.id,
+      e.name,
+      e.priceCents,
+      serviceNames(e.serviceIds, repo.services),
+      onConfirm: (amount) => repo.confirmPreviousDayPayment(e.id, amount),
+    );
+  }
+
+  /// «تأكيد الدفع» مباشرة لحجز يوم سابق أُنهي بالفعل.
+  Future<void> _confirmPreviousDayPayment(QueueEntry e) async {
+    final repo = ref.read(barberRepoProvider);
+    await showPaymentSheet(
+      context,
+      repo,
+      e.id,
+      e.name,
+      e.priceCents,
+      serviceNames(e.serviceIds, repo.services),
+      onConfirm: (amount) => repo.confirmPreviousDayPayment(e.id, amount),
+    );
+  }
+
   Future<void> _itemActions(QueueEntry e) async {
     final repo = ref.read(barberRepoProvider);
     final canStart = repo.current == null;
@@ -155,6 +185,64 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     final offline = repo.link == LinkStatus.offline;
 
     final children = <Widget>[];
+
+    // حجوزات من يوم عمل سابق أُغلق وما زالت بانتظار إنهاء أو تأكيد دفع (ق24)
+    // — قسم منفصل أعلى الشاشة، قبل كل شيء آخر، فلا يفوت الحلاق إنهاءها.
+    final previousDay = repo.unfinishedFromPreviousDay;
+    if (previousDay.isNotEmpty) {
+      children.add(Section(
+        title: 'من يوم سابق',
+        children: [
+          const SaloniBanner(
+            tone: SaloniBannerTone.warning,
+            body: 'أُغلق يوم عملك وهذه الحجوزات ما زالت لديك — أنهِها وأكّد دفعها.',
+          ),
+          for (final e in previousDay)
+            SurfaceCard(
+              key: Key('previous-day-${e.id}'),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(children: [
+                    StatusBadge(status: uiStatus(e.status)),
+                    const Spacer(),
+                    if (e.status == sa.BookingStatus.done)
+                      StatusBadge(
+                        status: e.payment == sa.PaymentStatus.confirmed
+                            ? BookingStatus.payConfirmed
+                            : BookingStatus.payAwaiting,
+                        small: true,
+                      ),
+                  ]),
+                  const SizedBox(height: 6),
+                  Text(e.name, style: SaloniTextStyles.title3.copyWith(color: c.ink)),
+                  Text(serviceNames(e.serviceIds, repo.services),
+                      style: SaloniTextStyles.body.copyWith(color: c.inkMuted)),
+                  const SizedBox(height: 12),
+                  if (e.status != sa.BookingStatus.done)
+                    SaloniButton(
+                      key: Key('finish-previous-${e.id}'),
+                      label: 'إنهاء الخدمة',
+                      icon: SaloniIconName.scissors,
+                      size: SaloniButtonSize.md,
+                      block: true,
+                      onPressed: () => _finishPreviousDay(e),
+                    )
+                  else if (e.payment != sa.PaymentStatus.confirmed)
+                    SaloniButton(
+                      key: Key('confirm-payment-previous-${e.id}'),
+                      label: 'تأكيد الدفع',
+                      icon: SaloniIconName.coins,
+                      size: SaloniButtonSize.md,
+                      block: true,
+                      onPressed: () => _confirmPreviousDayPayment(e),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ));
+    }
 
     if (!repo.ready) {
       children.add(const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator())));

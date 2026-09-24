@@ -73,6 +73,33 @@ void main() {
       );
       expect(result, DateTime.utc(2026, 9, 24, 7, 0)); // 10:00 الرياض نفس اليوم
     });
+
+    test(
+        'بلا حلاق محدد (fastest) على صالون ليلي 16:00–02:00: طلب 01:00 عند '
+        '23:00 لا يقع في الماضي — يلتف لليوم التالي (I5 متبقٍّ)', () {
+      final result = anchorRequestedTimeUtc(
+        hour: 1,
+        minute: 0,
+        timezoneName: 'Asia/Riyadh',
+        // بلا معرفة دوام حلاق بعينه («الأسرع») — نفس الحال في صالون ليلي
+        // 16:00–02:00 مفتوح فعلًا وقت الطلب.
+        nowUtc: DateTime.utc(2026, 9, 24, 20, 0), // 23:00 الرياض
+      );
+      // 01:00 اليوم (24/9) سبق بالفعل — يُنقل إلى 01:00 اليوم التالي (25/9)
+      // = 22:00 UTC في 24/9، لا وقت في الماضي.
+      expect(result, DateTime.utc(2026, 9, 24, 22, 0));
+      expect(result.isAfter(DateTime.utc(2026, 9, 24, 20, 0)), isTrue);
+    });
+
+    test('بلا حلاق محدد (fastest): الساعة المطلوبة لم تفت بعد — تبقى اليوم نفسه', () {
+      final result = anchorRequestedTimeUtc(
+        hour: 23,
+        minute: 30,
+        timezoneName: 'Asia/Riyadh',
+        nowUtc: DateTime.utc(2026, 9, 24, 20, 0), // 23:00 الرياض
+      );
+      expect(result, DateTime.utc(2026, 9, 24, 20, 30)); // 23:30 الرياض نفس اليوم
+    });
   });
 
   group('عرض الوقت بتوقيت الصالون', () {

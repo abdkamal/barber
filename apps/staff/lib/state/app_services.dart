@@ -32,6 +32,44 @@ class AppServices {
   final AppPrefs prefs;
   final Duration heartbeat;
 
+  /// مقبض التخزين المحلي المفتوح حاليًا (إن وُجد) — يضمن عدم فتح مقبض ثانٍ
+  /// متزامن على نفس قاعدة SQLCipher عند الإغلاق القسري أو المسح (انظر
+  /// `openLocalStore`/`closeActiveHandle`/`destroyLocalStore`).
+  LocalStoreHandle? activeHandle;
+
+  /// يغلق أي مقبض سابق أولًا (دفاعيًا) ثم يفتح مقبضًا جديدًا ويتتبعه.
+  Future<LocalStoreHandle> openLocalStore() async {
+    await closeActiveHandle();
+    final h = await storage.openLocalStore();
+    activeHandle = h;
+    return h;
+  }
+
+  /// يغلق المقبض النشط دون مسح بياناته (خروج قسري لا يعني فقدان الصندوق).
+  Future<void> closeActiveHandle() async {
+    final h = activeHandle;
+    activeHandle = null;
+    if (h != null) {
+      try {
+        await h.close();
+      } catch (_) {}
+    }
+  }
+
+  /// يمسح التخزين المحلي: يغلق ويمسح المقبض النشط مباشرة إن وُجد (لا يفتح
+  /// مقبضًا ثانيًا بينما الأول ما زال قد يكون مفتوحًا)، وإلا يفتح مقبضًا واحدًا
+  /// جديدًا ليمسحه.
+  Future<void> destroyLocalStore() async {
+    final h = activeHandle;
+    activeHandle = null;
+    if (h != null) {
+      await h.destroy();
+      return;
+    }
+    final fresh = await storage.openLocalStore();
+    await fresh.destroy();
+  }
+
   static Future<AppServices> create() async {
     final prefs = await AppPrefs.load();
     final storage = defaultStoragePlatform();
@@ -95,6 +133,14 @@ class AuthController extends ChangeNotifier {
   /// يتغير مع كل دخول/خروج — مفتاح إعادة بناء مستودع الطابور.
   int sessionKey = 0;
 
+  /// عدد إجراءات الصندوق التي لم تُزامن بعد، محفوظة من آخر خروج قسري (جلسة
+  /// أُبطلت لا حساب أُوقف) — تُعرض للحلاق في شاشة الدخول ليعرف أن بياناته لم
+  /// تُفقد. تُصفَّر بعد أي دخول ناجح.
+  int pendingUnsyncedActions = 0;
+
+  /// رسالة عربية تُعرض في شاشة الدخول بعد خروج قسري (§الإصلاح 1).
+  String? forcedSignOutNotice;
+
   bool get isManager => role == sa.UserRole.manager;
   Currency get currency => Currency.of(salon?.currency);
 
@@ -140,12 +186,25 @@ class AuthController extends ChangeNotifier {
   }) async {
     final code = salonCode.trim().toUpperCase();
     final user = username.trim();
-    final session = await services.api.loginStaff(
-      salonCode: code,
-      username: user,
-      password: password,
-      rememberMe: rememberMe,
-    );
+    sa.Session session;
+    try {
+      session = await services.api.loginStaff(
+        salonCode: code,
+        username: user,
+        password: password,
+        rememberMe: rememberMe,
+      );
+    } on sa.ApiError catch (e) {
+      // ق: حساب أو صالون مُوقف — هذا هو المكان الوحيد الذي يصرّح فيه
+      // السيرفر بذلك صراحة (docs/api.md)؛ إبطال الجلسات عن إيقاف يصل لاحقًا
+      // بـ401 عامّ لا يميَّز عن إبطال جلسة عادي، فلا يُمسح التخزين هناك.
+      if (e.isAccountSuspended) {
+        await services.destroyLocalStore();
+        pendingUnsyncedActions = 0;
+        forcedSignOutNotice = null;
+      }
+      rethrow;
+    }
     if (session.role == sa.UserRole.customer) {
       await services.api.logout();
       throw const sa.ApiError(
@@ -158,6 +217,8 @@ class AuthController extends ChangeNotifier {
     await _adoptSession(session);
     role = session.role;
     status = AuthStatus.signedIn;
+    pendingUnsyncedActions = 0;
+    forcedSignOutNotice = null;
     sessionKey++;
     notifyListeners();
   }
@@ -204,8 +265,9 @@ class AuthController extends ChangeNotifier {
   Future<void> _adoptOwner(String owner) async {
     final prev = services.prefs.storeOwner;
     if (prev != null && prev != owner) {
-      final h = await services.storage.openLocalStore();
-      await h.destroy();
+      await services.destroyLocalStore();
+      pendingUnsyncedActions = 0;
+      forcedSignOutNotice = null;
     }
     await services.prefs.setStoreOwner(owner);
   }
@@ -216,29 +278,56 @@ class AuthController extends ChangeNotifier {
     await services.prefs.setSalon(null);
     await services.prefs.setAccountName(null);
     await services.prefs.setStoreOwner(null);
+    pendingUnsyncedActions = 0;
+    forcedSignOutNotice = null;
     _clear();
   }
 
-  /// انتهت الجلسة: تجديد رفضه السيرفر (401/403) — يشمل حسابًا أُوقف
-  /// (`ACCOUNT_SUSPENDED` تُلغي جلساته فيصل السيرفر لاحقًا بـ401، design.md
-  /// §7) أو جلسة أُبطلت. **تُمسح قاعدة SQLCipher المحلية ومفتاحها فورًا**
-  /// (design.md §6.1: «يُمسح عند الخروج أو إيقاف الحساب») — لا تنتظر خروجًا
-  /// صريحًا؛ بيانات طابور حساب لم يعد صالحًا لا تبقى على الجهاز.
+  /// انتهت الجلسة: تجديد رفضه السيرفر (401/403) — جلسة أُبطلت (نقل يدوي،
+  /// كشف إعادة استخدام رمز، إعادة تعيين كلمة مرور)، أو حساب/صالون أُوقف
+  /// (`ACCOUNT_SUSPENDED`/`SALON_SUSPENDED` يُلغي جلساته فيصل التجديد لاحقًا
+  /// بـ401 عامّ لا يميَّز هنا عن أي إبطال آخر — docs/api.md، design.md §7).
+  ///
+  /// **لا تُمسح** قاعدة SQLCipher ولا صندوق الأحداث المعلّقة هنا: قد تكون
+  /// جلسة أُبطلت فقط لا حسابًا مُوقفًا، فمسح صندوق لم يُزامن بعد يفقد عمل
+  /// الحلاق. يُغلق مقبض القاعدة النشط فقط (يمنع فتح مقبض ثانٍ متزامن لاحقًا،
+  /// وهو ما كان يسبب تلفًا محتملًا)، وتُعرض للحلاق رسالة بعدد المعلّق ليدخل
+  /// من جديد. المسح الفعلي يحدث فقط عند: (أ) تأكيد الإيقاف صراحة عند محاولة
+  /// الدخول التالية ([login])، أو (ب) دخول حساب مختلف على هذا الجهاز
+  /// ([_adoptOwner]). بعد دخول **نفس** الحساب يُزامَن الصندوق المحفوظ تلقائيًا
+  /// (المحرك يُرسله عند أول `refresh`).
   void _forcedSignOut() {
     if (status != AuthStatus.signedIn) return;
-    unawaited(_wipeLocalStoreOnForcedSignOut());
+    unawaited(_handleForcedSignOut());
+  }
+
+  Future<void> _handleForcedSignOut() async {
+    final pending = await _pendingOutboxCount();
+    // يغلق مقبض القاعدة النشط (مقبض المستودع الحالي) قبل أي شيء آخر — لا
+    // يُفتح مقبض جديد هنا إطلاقًا، فلا يوجد قط مقبضان مفتوحان على نفس الملف.
+    await services.closeActiveHandle();
+    try {
+      await services.device.stopKeepAlive();
+    } catch (_) {}
+    pendingUnsyncedActions = pending;
+    forcedSignOutNotice = pending > 0
+        ? 'انقطعت الجلسة، لكن ${_arNum(pending)} لم تُزامن بعد وبقيت محفوظة على الجهاز. '
+            'سجّل الدخول بنفس الحساب لإكمال المزامنة.'
+        : 'انقطعت الجلسة. يرجى تسجيل الدخول من جديد.';
     _clear();
   }
 
-  Future<void> _wipeLocalStoreOnForcedSignOut() async {
+  Future<int> _pendingOutboxCount() async {
+    final h = services.activeHandle;
+    if (h == null) return 0;
     try {
-      final h = await services.storage.openLocalStore();
-      await h.destroy();
-      await services.device.stopKeepAlive();
-    } catch (e) {
-      debugPrint('forced sign-out wipe failed: $e');
+      return (await h.store.getOutbox()).length;
+    } catch (_) {
+      return 0;
     }
   }
+
+  String _arNum(int n) => n == 1 ? 'إجراءً واحدًا' : (n == 2 ? 'إجراءين' : '$n إجراءات');
 
   void _clear() {
     role = null;
@@ -262,7 +351,8 @@ final barberRepoProvider = ChangeNotifierProvider<BarberRepository>((ref) {
   final auth = ref.read(authProvider);
   final repo = BarberRepository(
     api: services.api,
-    openStore: services.storage.openLocalStore,
+    openStore: services.openLocalStore,
+    onHandleReleased: () => services.activeHandle = null,
     device: services.device,
     currency: auth.currency,
     heartbeat: services.heartbeat,

@@ -17,6 +17,14 @@ class MultiSalonStore {
   final FlutterSecureStorage _storage;
   List<SalonSession>? _cache;
 
+  /// رموز الصالونات التي وافق الزبون على تذكّرها («الدخول تلقائيًا») في هذا
+  /// التشغيل — الوحيدة التي يجوز لـ [_persist] كتابتها على القرص (L7). أي
+  /// جلسة في [_cache] لصالون آخر (مثلًا صالون لم يُفعَّل له «تذكّرني» فبقي
+  /// في الذاكرة فقط) **لا تُكتب أبدًا** حتى لو جدّد صالون آخر جلسته وكتب فوق
+  /// الملف كله. كل رمز يُقرأ من القرص عند [loadAll] يُعامل بالضرورة كمتذكَّر
+  /// (لا يكتب `_persist` غيره).
+  final Set<String> _remembered = {};
+
   Future<List<SalonSession>> loadAll() async {
     if (_cache != null) return _cache!;
     final raw = await _storage.read(key: _salonsKey);
@@ -29,14 +37,19 @@ class MultiSalonStore {
       _cache = list
           .map((e) => SalonSession.fromJson(e as Map<String, dynamic>))
           .toList();
+      _remembered
+        ..clear()
+        ..addAll(_cache!.map((e) => e.code));
     } catch (_) {
       _cache = [];
     }
     return _cache!;
   }
 
+  /// يكتب على القرص **فقط** الجلسات التي في [_remembered] — أبدًا جلسة صالون
+  /// آخر بقيت في [_cache] لهذا التشغيل دون أن يوافق الزبون على تذكّرها (L7).
   Future<void> _persist() async {
-    final list = _cache ?? [];
+    final list = (_cache ?? []).where((e) => _remembered.contains(e.code)).toList();
     await _storage.write(
       key: _salonsKey,
       value: jsonEncode(list.map((e) => e.toJson()).toList()),
@@ -53,8 +66,10 @@ class MultiSalonStore {
     _cache!.removeWhere((e) => e.code == salonSession.code);
     _cache!.add(salonSession);
     if (rememberMe) {
+      _remembered.add(salonSession.code);
       await _persist();
     } else {
+      _remembered.remove(salonSession.code);
       await _persistWithoutOnDisk(salonSession.code);
     }
   }
@@ -83,6 +98,7 @@ class MultiSalonStore {
   Future<void> remove(String code) async {
     await loadAll();
     _cache!.removeWhere((e) => e.code == code);
+    _remembered.remove(code);
     await _persist();
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getString(_activeKey) == code) {

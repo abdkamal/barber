@@ -5,14 +5,19 @@ import '../../data/barber_repository.dart';
 import '../common/ui.dart';
 
 /// بعد الإنهاء: تأكيد استلام الدفع (مستقل عن حالة الخدمة — design.md §3).
+///
+/// [onConfirm] اختياري: افتراضيًا `repo.confirmPayment` (حجز طابور اليوم)؛
+/// يُمرَّر `repo.confirmPreviousDayPayment` لحجز من يوم سابق أُغلق (ق24).
 Future<void> showPaymentSheet(
   BuildContext context,
   BarberRepository repo,
   String bookingId,
   String name,
   int amountCents,
-  String services,
-) {
+  String services, {
+  Future<void> Function(int amountCents)? onConfirm,
+}) {
+  final confirm = onConfirm ?? (amount) => repo.confirmPayment(bookingId, amount);
   return showSaloniSheet<void>(context, (ctx) {
     final c = ctx.saloniColors;
     return Column(
@@ -39,7 +44,7 @@ Future<void> showPaymentSheet(
           size: SaloniButtonSize.lg,
           block: true,
           onPressed: () async {
-            await repo.confirmPayment(bookingId, amountCents);
+            await confirm(amountCents);
             if (ctx.mounted) Navigator.of(ctx).pop();
           },
         ),

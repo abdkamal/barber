@@ -108,6 +108,7 @@ class StaffToday {
     required this.settings,
     required this.serverTime,
     required this.seq,
+    this.unfinishedFromPreviousDay = const [],
   });
 
   /// يوم العمل الحالي، أو `null` إن لم يكن للحلاق دوام الآن.
@@ -134,6 +135,11 @@ class StaffToday {
   /// رقم المزامنة الحالي — يُستخدم كنقطة بداية لـ `GET /sync?since=`.
   final int seq;
 
+  /// حجوزات `in_service` من يوم عمل سابق أُغلق قبل أن ينهيها الحلاق (ق24:
+  /// «خدمة بعد الإغلاق») — تبقى بانتظار «إنهاء الخدمة» ثم «تأكيد الدفع» عبر
+  /// الصندوق. اختياري: فارغ افتراضيًا مع إصدارات سيرفر أقدم لا ترسله بعد.
+  final List<Booking> unfinishedFromPreviousDay;
+
   bool get hasShift => day != null;
 
   BreakPeriod? get openBreak {
@@ -153,6 +159,8 @@ class StaffToday {
         settings: asMap(json['settings']),
         serverTime: parseUtc(json['serverTime'] as String),
         seq: asIntOrNull(json['seq']) ?? 0,
+        unfinishedFromPreviousDay:
+            parseList(json['unfinishedFromPreviousDay'], Booking.fromJson),
       );
 
   Map<String, dynamic> toJson() => {
@@ -165,5 +173,7 @@ class StaffToday {
         'settings': settings,
         'serverTime': toIso(serverTime),
         'seq': seq,
+        'unfinishedFromPreviousDay':
+            unfinishedFromPreviousDay.map((e) => e.toJson()).toList(),
       };
 }

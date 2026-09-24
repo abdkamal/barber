@@ -40,6 +40,12 @@ class ApiError implements Exception {
   /// حساب الزبون بانتظار اعتماد الصالون (`403 ACCOUNT_PENDING`).
   bool get isAccountPending => code == 'ACCOUNT_PENDING';
 
+  /// الحساب أو الصالون موقوف — يظهر عند الدخول فقط (`403 ACCOUNT_SUSPENDED`
+  /// أو `SALON_SUSPENDED`)؛ إبطال الجلسات الناتج عنه يصل لاحقًا بـ401 عامّ لا
+  /// يميَّز عن إبطال جلسة عادي (docs/api.md).
+  bool get isAccountSuspended =>
+      code == 'ACCOUNT_SUSPENDED' || code == 'SALON_SUSPENDED';
+
   Map<String, dynamic>? get _detailsMap =>
       details is Map ? Map<String, dynamic>.from(details as Map) : null;
 

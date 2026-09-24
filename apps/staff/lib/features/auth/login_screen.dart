@@ -68,6 +68,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final c = context.saloniColors;
+    final notice = ref.watch(authProvider).forcedSignOutNotice;
     return Scaffold(
       body: SafeArea(
         child: ListView(
@@ -80,6 +81,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 textAlign: TextAlign.center,
                 style: SaloniTextStyles.body.copyWith(color: c.inkMuted)),
             const SizedBox(height: 40),
+            if (notice != null) ...[
+              SaloniBanner(tone: SaloniBannerTone.info, body: notice),
+              const SizedBox(height: 16),
+            ],
             SaloniTextField(
               label: 'رمز الصالون',
               controller: _code,

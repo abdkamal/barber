@@ -202,12 +202,30 @@ void main() {
         settings: const {'callLeadMinutes': 20},
         serverTime: DateTime.utc(2026, 9, 24, 9, 0),
         seq: 42,
+        unfinishedFromPreviousDay: [
+          Booking(
+            id: 'b0',
+            customerId: 'c0',
+            barberId: 'br1',
+            serviceIds: const ['s1'],
+            kind: BookingKind.queue,
+            status: BookingStatus.inService,
+            originalEta: DateTime.utc(2026, 9, 23, 22, 0),
+            source: BookingSource.app,
+          ),
+        ],
       );
       final decoded = StaffToday.fromJson(staffToday.toJson());
       expect(decoded.seq, 42);
       expect(decoded.queue.single.id, 'b1');
       expect(decoded.breaks.single.kind, BreakKind.prayer);
       expect(decoded.settings['callLeadMinutes'], 20);
+      expect(decoded.unfinishedFromPreviousDay.single.id, 'b0');
+      expect(decoded.unfinishedFromPreviousDay.single.status, BookingStatus.inService);
+
+      // إصدار سيرفر أقدم لا يرسل الحقل — يُقرأ فارغًا افتراضيًا لا يرمي خطأ.
+      final legacyJson = staffToday.toJson()..remove('unfinishedFromPreviousDay');
+      expect(StaffToday.fromJson(legacyJson).unfinishedFromPreviousDay, isEmpty);
     });
 
     test('SyncPullResult', () {

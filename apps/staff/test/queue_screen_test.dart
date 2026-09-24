@@ -107,4 +107,42 @@ void main() {
     expect(find.text('عبدالعزيز'), findsOneWidget);
     await teardownApp(tester, h);
   });
+
+  testWidgets(
+      'حجوزات من يوم سابق أُغلق (ق24) تظهر في قسم منفصل أعلى الشاشة وتُنهى '
+      'وتُدفع عبر الصندوق', (tester) async {
+    final server = FakeServer()
+      ..booking(id: 'b1', name: 'محمد العتيبي', status: 'called', position: 0)
+      ..previousDayBooking(id: 'p1', name: 'سلطان القحطاني');
+    final h = await pumpStaffApp(tester, server);
+
+    // القسم يظهر قبل «التالون» وبقية الشاشة.
+    expect(find.text('من يوم سابق'), findsOneWidget);
+    expect(find.text('سلطان القحطاني'), findsOneWidget);
+    expect(find.byKey(const Key('finish-previous-p1')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('finish-previous-p1')));
+    await settle(tester);
+
+    // إنهاء الخدمة يسجّل الحدث ويعرض ورقة الدفع فورًا.
+    expect(server.eventTypes, contains('service_finished'));
+    expect(
+        server.events.firstWhere((e) => e['type'] == 'service_finished')['bookingId'],
+        'p1');
+    expect(find.byKey(const Key('confirm-payment')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('confirm-payment')));
+    await settle(tester);
+
+    expect(server.eventTypes, containsAllInOrder(['service_finished', 'payment_confirmed']));
+    expect(
+        server.events.firstWhere((e) => e['type'] == 'payment_confirmed')['bookingId'],
+        'p1');
+
+    // بعد الإنهاء والدفع: تظهر «تأكيد الدفع» فقط ما لم يُؤكَّد بعد، ثم يختفي
+    // القسم كليًا بعد أن يزيله السيرفر من `unfinishedFromPreviousDay` (هنا:
+    // لا يزال يعيده السيرفر الوهمي، لكن حالة الدفع أصبحت مؤكدة محليًا فلا
+    // يظهر زر «تأكيد الدفع» بعد الآن).
+    expect(find.byKey(const Key('confirm-payment-previous-p1')), findsNothing);
+    await teardownApp(tester, h);
+  });
 }

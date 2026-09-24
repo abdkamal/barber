@@ -11,9 +11,16 @@ class FakeServer {
   String role;
   bool online = true;
 
-  /// يحاكي جلسة أُلغيت (حساب أُوقف أو رمز تجديد أُبطل، design.md §7): كل
-  /// الطلبات تعيد 401، وتجديد الرمز يعيد 401 أيضًا فيُلغي `ApiClient` الجلسة.
+  /// يحاكي جلسة أُلغيت (رمز تجديد أُبطل أو كُشف إعادة استخدامه، أو حساب أُوقف
+  /// أثناء الجلسة — design.md §7): كل الطلبات تعيد 401، وتجديد الرمز يعيد 401
+  /// أيضًا فيُلغي `ApiClient` الجلسة. **لا** يميَّز هذا عن حساب موقوف — تمامًا
+  /// كسلوك السيرفر الحقيقي (docs/api.md: الإيقاف لا يُصرَّح به إلا عند الدخول).
   bool sessionRevoked = false;
+
+  /// يحاكي `403 ACCOUNT_SUSPENDED`/`SALON_SUSPENDED` عند محاولة الدخول فقط
+  /// (`auth.service.ts`: `staffLogin` يتحقق من `staff.active`/حالة الصالون) —
+  /// المكان الوحيد الذي يصرّح فيه السيرفر بالإيقاف صراحة.
+  bool loginSuspended = false;
 
   /// معرّفات حجوزات يرفض السيرفر الوهمي حدث `postponed` عليها (لمحاكاة رفض
   /// حقيقي — ق23/design.md §6.2 — عندما لا يُصرَّح بإعفاء `canPostpone`).
@@ -28,6 +35,10 @@ class FakeServer {
   ];
 
   final List<Map<String, dynamic>> queue = [];
+
+  /// حجوزات `in_service` من يوم سابق أُغلق (ق24) — `unfinishedFromPreviousDay`
+  /// في `GET /staff/today`.
+  final List<Map<String, dynamic>> previousDayQueue = [];
   final List<Map<String, dynamic>> events = [];
   final List<String> requests = [];
   Map<String, dynamic> impact = const {'changes': [], 'pastClosing': []};
@@ -76,6 +87,18 @@ class FakeServer {
       durationMin: durationMin,
     );
     queue.add(b);
+    return b;
+  }
+
+  /// حجز `in_service` من يوم سابق أُغلق (ق24) — يُضاف إلى
+  /// `unfinishedFromPreviousDay` لا إلى طابور اليوم الحالي.
+  Map<String, dynamic> previousDayBooking({
+    required String id,
+    required String name,
+    String status = 'in_service',
+  }) {
+    final b = bookingJson(id: id, name: name, status: status, startedMinAgo: 90);
+    previousDayQueue.add(b);
     return b;
   }
 
@@ -195,6 +218,12 @@ class FakeServer {
       }, 401);
     }
 
+    if (loginSuspended && path == '/auth/staff/login') {
+      return json({
+        'error': {'code': 'ACCOUNT_SUSPENDED', 'message': 'هذا الحساب موقوف'}
+      }, 403);
+    }
+
     switch ('${req.method} $path') {
       case 'POST /auth/staff/login':
       case 'POST /auth/refresh':
@@ -234,6 +263,7 @@ class FakeServer {
           'settings': {'maxDisconnectWindowMinutes': 120, 'overrunAlertPercent': 100},
           'serverTime': DateTime.now().toUtc().toIso8601String(),
           'seq': seq,
+          'unfinishedFromPreviousDay': previousDayQueue,
         });
       case 'POST /sync/events':
         final list = (body()['events'] as List).cast<Map<String, dynamic>>();

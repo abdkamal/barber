@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:saloni_api/saloni_api.dart' as sa;
 import 'package:saloni_staff/core/platform/storage.dart';
 import 'package:saloni_staff/state/app_services.dart';
 
@@ -7,26 +8,133 @@ import 'support/harness.dart';
 
 void main() {
   testWidgets(
-    'جلسة أُبطلت (401/403 عند التجديد، مثل ACCOUNT_SUSPENDED): تُمسح قاعدة SQLCipher المحلية فورًا (design.md §6.1)',
+    'جلسة أُبطلت (401/403 عند التجديد — نقل يدوي/كشف إعادة استخدام/إعادة '
+    'تعيين كلمة مرور): يبقى الصندوق والمستودع المحليان، ثم يُزامنان تلقائيًا '
+    'بعد دخول نفس الحساب من جديد',
     (tester) async {
       final server = FakeServer(role: 'barber');
       server.booking(id: 'q1', name: 'فهد');
-      final h = await pumpStaffApp(tester, server);
+      final h = await pumpStaffApp(tester, server, signedIn: false);
 
-      // الطابور محفوظ محليًا بعد أول مزامنة ناجحة.
-      final storage = h.services.storage as InMemoryStoragePlatform;
-      expect((await storage.shared.getQueue()), isNotEmpty);
+      // دخول أول يُثبّت «صاحب البيانات المحلية» (رمز الصالون|اسم المستخدم).
+      await h.auth.login(
+        salonCode: 'RAHA-27',
+        username: 'khaled',
+        password: 'x',
+        rememberMe: true,
+      );
+      await settle(tester);
       expect(h.auth.status, AuthStatus.signedIn);
 
-      // السيرفر يوقف الحساب/يبطل الجلسة: كل الطلبات ثم التجديد يعيدان 401.
-      server.sessionRevoked = true;
+      final storage = h.services.storage as InMemoryStoragePlatform;
+      expect(await storage.shared.getQueue(), isNotEmpty);
 
-      // يطلق دورة مزامنة جديدة (نبضة/سحب) فتصطدم بـ401 ثم يفشل التجديد.
-      await h.container.read(barberRepoProvider).refresh();
+      // السيرفر يبطل الجلسة (نقل يدوي/كشف إعادة استخدام رمز/إعادة تعيين
+      // كلمة مرور — كلها 401 عامّ لا تفصح عن السبب، docs/api.md). يسجّل
+      // الحلاق إجراءً محليًا أولًا فيبقى معلّقًا في الصندوق.
+      server.sessionRevoked = true;
+      await h.container.read(barberRepoProvider).startBreak(sa.BreakKind.rest);
       await settle(tester);
 
       expect(h.auth.status, AuthStatus.signedOut, reason: 'خرج المستخدم قسرًا');
-      expect(await storage.shared.getQueue(), isEmpty, reason: 'مُسح الطابور المحلي فورًا لا عند خروج صريح فقط');
+      expect(h.auth.forcedSignOutNotice, isNotNull);
+      expect(h.auth.pendingUnsyncedActions, greaterThan(0));
+
+      // **لا يُمسح** الطابور المحلي ولا الصندوق المعلّق — هذا هو الإصلاح.
+      expect(await storage.shared.getQueue(), isNotEmpty,
+          reason: 'الطابور المحلي يبقى محفوظًا بعد إبطال جلسة (لا إيقاف حساب)');
+      expect(await storage.shared.getOutbox(), isNotEmpty,
+          reason: 'الإجراء المعلّق يبقى في الصندوق ليُزامَن لاحقًا');
+
+      // يعود الاتصال ويسجّل الحلاق دخوله بنفس الحساب من جديد.
+      server.sessionRevoked = false;
+      await h.auth.login(
+        salonCode: 'RAHA-27',
+        username: 'khaled',
+        password: 'x',
+        rememberMe: true,
+      );
+      await settle(tester);
+
+      expect(h.auth.status, AuthStatus.signedIn);
+      expect(h.auth.forcedSignOutNotice, isNull);
+      expect(h.auth.pendingUnsyncedActions, 0);
+      // الصندوق المحفوظ سابقًا زُومن تلقائيًا (المحرك يرسله عند أول تحديث).
+      expect(server.eventTypes, contains('break_started'),
+          reason: 'الصندoق المحتفظ به بعد إعادة الدخول بنفس الحساب يُزامن تلقائيًا');
+
+      await teardownApp(tester, h);
+    },
+  );
+
+  testWidgets(
+    'حساب موقوف صراحة (403 ACCOUNT_SUSPENDED عند الدخول): يُمسح التخزين '
+    'المحلي فورًا',
+    (tester) async {
+      final server = FakeServer(role: 'barber');
+      server.booking(id: 'q1', name: 'فهد');
+      final h = await pumpStaffApp(tester, server, signedIn: false);
+
+      await h.auth.login(salonCode: 'RAHA-27', username: 'khaled', password: 'x', rememberMe: true);
+      await settle(tester);
+      final storage = h.services.storage as InMemoryStoragePlatform;
+      expect(await storage.shared.getQueue(), isNotEmpty);
+
+      // خروج قسري (جلسة أُبطلت — السبب غير معروف للجهاز بعد) يترك البيانات.
+      server.sessionRevoked = true;
+      await h.container.read(barberRepoProvider).refresh();
+      await settle(tester);
+      expect(h.auth.status, AuthStatus.signedOut);
+      expect(await storage.shared.getQueue(), isNotEmpty);
+
+      // محاولة الدخول من جديد تكشف الآن أن الحساب مُوقف صراحة.
+      server.sessionRevoked = false;
+      server.loginSuspended = true;
+      await expectLater(
+        h.auth.login(
+            salonCode: 'RAHA-27', username: 'khaled', password: 'x', rememberMe: true),
+        throwsA(isA<sa.ApiError>().having((e) => e.code, 'code', 'ACCOUNT_SUSPENDED')),
+      );
+      await settle(tester);
+
+      expect(await storage.shared.getQueue(), isEmpty,
+          reason: 'تأكّد الإيقاف صراحة عند الدخول — يُمسح التخزين المحلي الآن');
+      expect(await storage.shared.getOutbox(), isEmpty);
+
+      await teardownApp(tester, h);
+    },
+  );
+
+  testWidgets(
+    'دخول حساب مختلف على نفس الجهاز بعد خروج قسري: يُمسح التخزين المحلي '
+    'للحساب السابق',
+    (tester) async {
+      final server = FakeServer(role: 'barber');
+      server.booking(id: 'q1', name: 'فهد');
+      final h = await pumpStaffApp(tester, server, signedIn: false);
+
+      await h.auth.login(salonCode: 'RAHA-27', username: 'khaled', password: 'x', rememberMe: true);
+      await settle(tester);
+      final storage = h.services.storage as InMemoryStoragePlatform;
+      expect(await storage.shared.getQueue(), isNotEmpty);
+
+      // إجراء معلّق لخالد قبل إبطال جلسته.
+      server.sessionRevoked = true;
+      await h.container.read(barberRepoProvider).startBreak(sa.BreakKind.rest);
+      await settle(tester);
+      expect(h.auth.status, AuthStatus.signedOut);
+      expect(await storage.shared.getOutbox(), isNotEmpty, reason: 'لم يُمسح بعد — السبب غير معروف');
+
+      // حلاق آخر (اسم مستخدم مختلف) يسجّل دخوله على هذا الجهاز.
+      server.sessionRevoked = false;
+      await h.auth.login(salonCode: 'RAHA-27', username: 'sami', password: 'y', rememberMe: true);
+      await settle(tester);
+
+      expect(h.auth.status, AuthStatus.signedIn);
+      expect(await storage.shared.getOutbox(), isEmpty,
+          reason: 'حساب مختلف على الجهاز — يُمسح صندوق الحساب السابق ولا يُزامَن (§6.1)');
+      expect(server.eventTypes, isNot(contains('break_started')),
+          reason: 'الإجراء المعلّق لخالد لم يُزامَن أبدًا مع حساب سامي');
 
       await teardownApp(tester, h);
     },
