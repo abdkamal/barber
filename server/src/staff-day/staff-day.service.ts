@@ -21,6 +21,7 @@ import {
   estimateFor,
   loadDay,
   opensAtOn,
+  operationalShift,
   project,
   releaseExpiredOffers,
   resolveShift,
@@ -92,7 +93,8 @@ export class StaffDayService {
   async today(t: TenantContext, me: Principal) {
     const now = this.clock.now();
     const settings = await SettingsRepo.get(t.db);
-    const shift = await resolveShift(t.db, t.salon.timezone, me.subjectId, now, settings.booking_opens_before_minutes * MINUTE);
+    // C1: after closing the day stays visible while customers are still being served (ق24).
+    const shift = await operationalShift(t.db, t.salon.timezone, me.subjectId, now, settings.booking_opens_before_minutes * MINUTE);
     const services = (await activeServices(t.db)).map((s) => ({
       id: s.id,
       name: s.name,
@@ -134,7 +136,7 @@ export class StaffDayService {
   async heartbeat(t: TenantContext, me: Principal, body: { deviceSeq: number; queueDigest?: string }) {
     const now = this.clock.now();
     const settings = await SettingsRepo.get(t.db);
-    const shift = await resolveShift(t.db, t.salon.timezone, me.subjectId, now, settings.booking_opens_before_minutes * MINUTE);
+    const shift = await operationalShift(t.db, t.salon.timezone, me.subjectId, now, settings.booking_opens_before_minutes * MINUTE);
     if (!shift) return { serverTime: iso(now), seq: await currentSeq(t.db), state: null, workDate: null };
     const out = await this.post.tx(t, async (q, effects) => {
       const ctx = await loadDay(q, t.salon, me.subjectId, shift, now, { lock: true, settings });
@@ -240,6 +242,8 @@ export class StaffDayService {
       const { rows: acct } = await q.query<{ id: string }>(
         `UPDATE customers SET linked_walk_in_id = $2, updated_at = now()
           WHERE phone = $1 AND password_hash IS NOT NULL AND linked_walk_in_id IS NULL
+            -- review H2: never to a pending/suspended/released account (the manager decides those)
+            AND status = 'active' AND phone_released_at IS NULL
             AND NOT EXISTS (SELECT 1 FROM customers a WHERE a.linked_walk_in_id = $2)
           RETURNING id`,
         [phone, id],
@@ -306,6 +310,8 @@ export class StaffDayService {
       id: string;
       booking_id: string;
       amount_minor: string;
+      confirmed_amount_minor: string | null;
+      discrepancy: boolean;
       status: string;
       confirmed_by_staff_id: string | null;
       confirmed_at: Date | null;
@@ -315,7 +321,7 @@ export class StaffDayService {
       work_date: string;
       actual_end: Date | null;
     }>(
-      `SELECT p.id, p.booking_id, p.amount_minor, p.status, p.confirmed_by_staff_id, p.confirmed_at, p.created_at,
+      `SELECT p.id, p.booking_id, p.amount_minor, p.confirmed_amount_minor, p.discrepancy, p.status, p.confirmed_by_staff_id, p.confirmed_at, p.created_at,
               b.staff_id, c.name AS customer_name, b.work_date::text AS work_date, b.actual_end
          FROM payments p JOIN bookings b ON b.id = p.booking_id JOIN customers c ON c.id = b.customer_id
         WHERE ($1::uuid IS NULL OR b.staff_id = $1)
@@ -326,7 +332,10 @@ export class StaffDayService {
     return rows.map((r) => ({
       id: r.id,
       bookingId: r.booking_id,
+      // Expected amount = the server's price snapshot; the confirmed amount is what the device reported.
       amountCents: Number(r.amount_minor),
+      confirmedAmountCents: r.confirmed_amount_minor === null ? null : Number(r.confirmed_amount_minor),
+      discrepancy: r.discrepancy,
       status: r.status,
       confirmedBy: r.confirmed_by_staff_id,
       confirmedAt: iso(r.confirmed_at),

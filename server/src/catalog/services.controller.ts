@@ -3,7 +3,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { Roles } from '../auth/auth.decorators';
 import type { Principal } from '../auth/principal';
-import { Errors } from '../common/errors';
+import { Errors, MAX_PRICE_MINOR, MAX_SERVICE_MINUTES } from '../common/errors';
 import { ZodPipe } from '../common/zod.pipe';
 import { writeAudit } from '../security/audit';
 import { clientIp } from '../security/client-ip';
@@ -13,16 +13,16 @@ import { ServiceRow, ServicesRepo } from './services.repository';
 
 const CreateService = z.object({
   name: z.string().trim().min(1).max(80),
-  durationMinutes: z.number().int().min(1).max(600),
-  price: z.number().int().min(0),
+  durationMinutes: z.number().int().min(1).max(MAX_SERVICE_MINUTES),
+  price: z.number().int().min(0).max(MAX_PRICE_MINOR),
 });
 const UpdateService = z
   .object({
     name: z.string().trim().min(1).max(80).optional(),
-    durationMinutes: z.number().int().min(1).max(600).optional(),
-    price: z.number().int().min(0).optional(),
+    durationMinutes: z.number().int().min(1).max(MAX_SERVICE_MINUTES).optional(),
+    price: z.number().int().min(0).max(MAX_PRICE_MINOR).optional(),
     active: z.boolean().optional(),
-    position: z.number().int().min(0).optional(),
+    position: z.number().int().min(0).max(10_000).optional(),
   })
   .strict();
 

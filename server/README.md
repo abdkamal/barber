@@ -10,12 +10,18 @@ NestJS + PostgreSQL 16. One **directory** database (`salons`) plus **one databas
 docker compose -f infra/docker-compose.yml up -d --wait   # PostgreSQL :5432 + PgBouncer :6432
 npm install                                               # from the repo root (npm workspaces)
 cd server
-cp .env.example .env        # optional — defaults match the compose file
+cp .env.example .env        # then fill the three secrets (see below) — required unless NODE_ENV=test
 npm run migrate             # directory DB, then every salon DB
 npm run start:dev           # http://localhost:3000/v1/health
 ```
 
 Production: `npm run build && npm start` (set `NODE_ENV=production` and the secrets below).
+
+**Startup checks (review M3):** the server (and the CLIs) refuse to start unless `NODE_ENV` is set
+explicitly to `development`, `test` or `production`, and — whenever it is not `test` — unless
+`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` and `RESET_CODE_PEPPER` are real secrets (≥ 32 chars, all
+different, not a placeholder). Generate each with
+`node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`.
 
 ## Tests
 
@@ -47,12 +53,48 @@ See `.env.example` for the full list with defaults. The important ones:
 | `PG_ADMIN_*` | direct PostgreSQL connection for `CREATE DATABASE` and migrations (role needs `CREATEDB`) |
 | `DIRECTORY_DB_NAME`, `SALON_DB_PREFIX` | directory DB name; prefix of per-salon DB names (`<prefix><code>`) |
 | `TENANT_POOL_MAX`, `TENANT_POOL_IDLE_TTL_MS`, `TENANT_POOLS_MAX` | small lazily-created pool per salon, closed when idle, capped in number |
-| `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `RESET_CODE_PEPPER` | **required in production**, ≥ 32 chars, all different |
+| `NODE_ENV` | **required**: `development` \| `test` \| `production` |
+| `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `RESET_CODE_PEPPER` | **required unless `NODE_ENV=test`**, ≥ 32 chars, all different, no placeholders |
 | `ACCESS_TOKEN_TTL_SEC` (900), `REFRESH_TOKEN_TTL_DAYS` (30), `RESET_CODE_TTL_HOURS` (24) | token lifetimes |
 | `ARGON2_*` | Argon2id cost (default 19 MiB, t=2, p=1) |
-| `TRUST_PROXY` | proxy hops to trust for the client IP (rate limits/backoff). Keep `false` unless behind a proxy |
+| `TRUST_PROXY` | whose `X-Forwarded-For` to trust for the client IP (rate limits/backoff): `false`, a hop count, or a comma-separated list of proxy IPs/CIDRs. `true` is refused in production — see "Behind nginx" |
 | `CORS_ORIGINS` | comma-separated browser origins; empty = CORS off (mobile apps don't need it) |
-| `BACKOFF_*` | progressive login backoff |
+| `BACKOFF_*` | progressive login backoff per account+IP and per IP; `BACKOFF_ACCOUNT_*` a slow account-wide delay (all IPs, capped at a few seconds, never a lockout) |
+| `MAX_PENDING_SALONS` | self-registration pauses (`503 REGISTRATION_PAUSED`) while this many salons wait for activation (default 50) |
+
+### Behind nginx (TLS termination)
+
+Run nginx on the same host and let it be the only way in (bind the Node server to `127.0.0.1`):
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name api.example.com;
+    # ssl_certificate … / ssl_certificate_key …; TLS 1.2+ only
+    client_max_body_size 6m;                       # photo uploads (5 MB) + multipart overhead
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $remote_addr;   # overwrite, never append the client's header
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location /v1/staff/stream {                    # WebSocket
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_read_timeout 120s;
+    }
+}
+```
+
+and set `HOST=127.0.0.1`, `TRUST_PROXY=1` (one hop) — or `TRUST_PROXY=127.0.0.1` (trust only that
+proxy's address). Because nginx *overwrites* `X-Forwarded-For` with the real peer address, a client
+cannot spoof its IP. Never use `TRUST_PROXY=true`: any client could then choose the IP that rate
+limits and login backoff are keyed on. Do not log query strings of `/v1/staff/stream` (tokens are no
+longer accepted there, but old clients may still send them).
 
 ## CLI
 
@@ -63,7 +105,11 @@ npm run vendor -- pending                              # salons waiting for acti
 npm run vendor -- activate RAHA-27
 npm run vendor -- suspend RAHA-27
 npm run vendor -- reset-manager-password RAHA-27 [--username owner]   # prints a one-time code (24 h)
+npm run vendor -- cleanup-pending [--older-than-days 14] [--dry-run] # drop never-activated salons (DB + directory row)
 ```
+
+Run `cleanup-pending` from cron (e.g. daily) so abandoned self-registrations do not accumulate; the
+global `MAX_PENDING_SALONS` cap bounds them in between.
 
 ## Endpoints in this milestone
 
@@ -87,7 +133,7 @@ Errors: `{"error":{"code":"UPPER_SNAKE","message":"نص عربي"}}`; `429` carr
 |---|---|
 | `GET /v1/customer/today`, `POST /v1/bookings/quote`, `POST /v1/bookings`, `DELETE /v1/offers/{id}`, `GET /v1/bookings/current`, `POST /v1/bookings/{id}/seen\|change-time\|cancel`, `GET /v1/customer/history` | customer (booking needs an **active** account) |
 | `GET /v1/staff/today`, `POST /v1/staff/walk-ins`, `POST /v1/staff/impact`, `GET /v1/staff/payments`, `POST /v1/heartbeat`, `POST /v1/sync/events`, `GET /v1/sync?since=` | barber, manager (own queue; managers see all payments/changes) |
-| `WS /v1/staff/stream` | barber, manager (access token in `Authorization` or `?access_token=`) |
+| `WS /v1/staff/stream` | barber, manager — access token in `Authorization`, in `Sec-WebSocket-Protocol: saloni.v1, bearer.<token>`, or a first message `{"type":"auth","token":…}` (never in the URL); ≤ 3 sockets per account |
 | `POST /v1/devices` | any signed-in user |
 | `GET /v1/manager/queues`, `POST /v1/manager/bookings/{id}/transfer` | manager (ق25: all queues today; manual transfer under ق4, both barber days locked in id order, customer notified) |
 
@@ -126,6 +172,30 @@ Shapes are pinned in `docs/api.md` ("أشكال مثبّتة"). Booking-changing
 The server consumes `@saloni/engine` from `packages/engine/dist` at runtime (`npm run build:engine`,
 run automatically by `build`, `start:dev` and `test:int`); typecheck and Jest use its TypeScript
 sources directly.
+
+### Phase 6 review fixes (summary)
+
+- **Operational day (C1):** `scheduling/day.ts#operationalShift` — the running shift, or after closing
+  the latest ended shift that still has active bookings (served late, ق24) until the next day's
+  booking window opens. Used by staff today, heartbeat, manager queues and the scheduler; walk-ins and
+  new bookings still need the running shift. `scheduling/day-close.ts` closes out stale days
+  (waiting/called → cancelled `day_closed` + notice; in service → `needs_review` + conflict) and
+  device breaks left open.
+- **ق23 on server facts (I1/H1):** `bookings.reference_before_advance` keeps the reference the
+  customer had before a call / earlier ق5 notice moved him earlier; the exemption uses it.
+  `POST /bookings/{id}/seen` records only values within 5 min of the server projection.
+- **Manager breaks/absences (I6):** `schedules/schedule-changes.service.ts` — locked days, queue
+  committed with `schedule_changed` / `barber_absent`, `breaks_changed` / `day_state` changes.
+- **Lock ordering:** `lockDays()` locks every day of an operation (id order) before any change is
+  emitted (quote with offer replacement, auto-assign, transfer).
+- **Security:** ق20 links only after approval + unlink / reassign / release phone (H2); uploads for
+  active salons only, sharp ≥ 0.35.4 (H3); normalised rate-limit keys + account-wide slow delay (M1);
+  strict `TRUST_PROXY` (M2); explicit `NODE_ENV` + real secrets (M3); pending-salon cap + cleanup CLI,
+  sync pre-validation, capped conflict rows, per-account sync budget (M4); clamped device times (L1);
+  server price as expected payment amount + recorded device amount (L2); https social links (L3);
+  generic register response (L4); owner / last-manager protection (L5); WebSocket auth without URL
+  tokens, per-account cap, batched revalidation (L6); price/duration bounds (L8). Migration
+  `salon/004_review_fixes.sql`.
 
 ## Layout
 

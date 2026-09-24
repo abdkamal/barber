@@ -65,6 +65,20 @@ export const DirectoryRepo = {
     return rows[0] ?? null;
   },
 
+  async countPending(q: Queryable): Promise<number> {
+    const { rows } = await q.query<{ n: string }>("SELECT count(*) AS n FROM salons WHERE status = 'pending_activation'");
+    return Number(rows[0]!.n);
+  },
+
+  /** Salons never activated, registered before `before` (review M4 cleanup). */
+  async stalePending(q: Queryable, before: Date): Promise<SalonRecord[]> {
+    const { rows } = await q.query<SalonRecord>(
+      `SELECT ${COLS} FROM salons WHERE status = 'pending_activation' AND activated_at IS NULL AND registered_at < $1 ORDER BY registered_at`,
+      [before],
+    );
+    return rows;
+  },
+
   async list(q: Queryable, status?: SalonStatus): Promise<SalonRecord[]> {
     const { rows } = status
       ? await q.query<SalonRecord>(`SELECT ${COLS} FROM salons WHERE status = $1 ORDER BY registered_at`, [status])

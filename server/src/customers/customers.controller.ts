@@ -60,12 +60,26 @@ export class CustomersController {
       const before = await CustomersRepo.findAccountById(q, id);
       if (!before) throw Errors.notFound();
       const suspending = status === 'suspended';
-      const c = await CustomersRepo.setStatus(q, id, status, suspending);
+      if (!suspending && before.phone_released_at) {
+        throw Errors.conflict('PHONE_RELEASED', 'أُفرج عن رقم هذا الحساب؛ أسند إليه رقمًا أولًا');
+      }
+      let c = await CustomersRepo.setStatus(q, id, status, suspending);
       if (suspending) await SessionsRepo.revokeAllFor(q, 'customer', id, 'suspended');
       await writeAudit(q, {
         actorKind: 'staff', actorId: me.subjectId, action: suspending ? 'customer.suspended' : 'customer.approved',
         targetKind: 'customer', targetId: id, ip, details: { from: before.status },
       });
+      // ق20 / review H2: the walk-in record matched at registration is linked only now, on approval.
+      if (!suspending && before.status === 'pending') {
+        const linked = await CustomersRepo.confirmProposedLink(q, id);
+        if (linked) {
+          await writeAudit(q, {
+            actorKind: 'staff', actorId: me.subjectId, action: 'customer.walk_in_linked', targetKind: 'customer', targetId: id, ip,
+            details: { walkInId: linked, onApproval: true },
+          });
+          c = await CustomersRepo.findPublicById(q, id);
+        }
+      }
       return c;
     });
   }

@@ -14,10 +14,12 @@ import {
   estimateFor,
   insertBookingEvent,
   loadDay,
+  lockDays,
+  operationalShift,
   project,
-  releaseExpiredOffers,
   shiftForDate,
   stateWire,
+  updateReference,
   workingStaff,
 } from '../scheduling/day';
 import { bookingDtos, type BookingDto } from '../scheduling/dto';
@@ -55,7 +57,7 @@ export class ManagerQueuesService {
     const lookahead = settings.booking_opens_before_minutes * MINUTE;
     const barbers = [];
     for (const s of await workingStaff(t.db)) {
-      const shift = currentShift(s.schedules, t.salon.timezone, now, lookahead);
+      const shift = await operationalShift(t.db, t.salon.timezone, s.id, now, lookahead, s.schedules);
       if (!shift) {
         barbers.push({ id: s.id, name: s.name, role: s.role, day: null, accepting: false, queue: [] });
         continue;
@@ -104,22 +106,20 @@ export class ManagerQueuesService {
         const sourceShift = await shiftForDate(q, t.salon.timezone, row.staff_id, row.work_date);
 
         // §5.13: lock both barber days, always in id order (no deadlock with other transfers/bookings).
-        const plan = [
-          { staffId: row.staff_id, shift: sourceShift },
-          { staffId: target.id, shift: targetShift },
-        ].sort((a, b) => (a.staffId < b.staffId ? -1 : 1));
-        const locked = new Map<string, DayCtx>();
-        for (const p of plan) {
-          const ctx = await loadDay(q, t.salon, p.staffId, p.shift, now, {
-            lock: true,
-            settings,
-            ...(p.staffId === target.id ? { staff: target } : {}),
-          });
-          await releaseExpiredOffers(q, ctx, effects);
-          locked.set(p.staffId, ctx);
-        }
-        const src = locked.get(row.staff_id)!;
-        const dst = locked.get(target.id)!;
+        // Both days are locked before either releases its expired offers (no change emitted before all locks).
+        const locked = await lockDays(
+          q,
+          t.salon,
+          [
+            { staffId: row.staff_id, shift: sourceShift },
+            { staffId: target.id, shift: targetShift, staff: target },
+          ],
+          now,
+          settings,
+          effects,
+        );
+        const src: DayCtx = locked.get(`${row.staff_id}|${sourceShift.workDate}`)!;
+        const dst: DayCtx = locked.get(`${target.id}|${targetShift.workDate}`)!;
 
         // Re-check under the lock: the barber may have started the service meanwhile.
         const entry = src.queue.find((e) => e.bookingId === id);
@@ -168,7 +168,7 @@ export class ManagerQueuesService {
         });
         const slot = slots.find((s) => s.bookingId === id)!;
         // The notice below tells the customer the new time: it becomes his ق5 reference.
-        await q.query('UPDATE bookings SET last_shown_expected_start = $2 WHERE id = $1', [id, new Date(slot.start)]);
+        await updateReference(q, id, slot.start, { reset: true });
         await insertBookingEvent(q, {
           bookingId: id,
           type: 'transferred',

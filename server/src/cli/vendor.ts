@@ -5,6 +5,7 @@
  *   npm run vendor -- activate <CODE>
  *   npm run vendor -- suspend <CODE>
  *   npm run vendor -- reset-manager-password <CODE> [--username <name>]
+ *   npm run vendor -- cleanup-pending [--older-than-days 14] [--dry-run]   (cron-able)
  */
 import { loadConfig, loadDotEnv } from '../config/config';
 import { PoolManager } from '../db/pools';
@@ -16,7 +17,8 @@ const USAGE = `usage:
   vendor pending
   vendor activate <CODE>
   vendor suspend <CODE>
-  vendor reset-manager-password <CODE> [--username <name>]`;
+  vendor reset-manager-password <CODE> [--username <name>]
+  vendor cleanup-pending [--older-than-days 14] [--dry-run]`;
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -48,6 +50,14 @@ export async function runVendor(args: string[], vendor: VendorService): Promise<
       if (!arg) break;
       const s = cmd === 'activate' ? await vendor.activate(arg) : await vendor.suspend(arg);
       console.log(`${s.code}: ${s.status}`);
+      return 0;
+    }
+    case 'cleanup-pending': {
+      const days = Number(flag(args, '--older-than-days') ?? 14);
+      const dry = args.includes('--dry-run');
+      const rows = await vendor.cleanupPending(days, dry);
+      printSalons(rows);
+      console.log(`${dry ? 'would remove' : 'removed'} ${rows.length} never-activated salon(s) older than ${days} day(s)`);
       return 0;
     }
     case 'reset-manager-password': {

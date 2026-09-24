@@ -3,7 +3,7 @@ import { NotificationService } from '../notifications/notification.service';
 import { Texts } from '../notifications/texts';
 import type { TenantQueryable } from '../tenancy/tenant-context';
 import { emitBooking } from './booking-writer';
-import { type DayCtx, type Effects, insertBookingEvent, project } from './day';
+import { type DayCtx, type Effects, insertBookingEvent, project, updateReference } from './day';
 
 /**
  * Design §5.5: at most one in service and one called; the next waiting customer is called once
@@ -27,11 +27,9 @@ export async function recordCall(
   immediate: boolean,
 ): Promise<void> {
   const slot = project(ctx).find((s) => s.bookingId === id);
-  await q.query('UPDATE bookings SET called_at = $2, last_shown_expected_start = COALESCE($3, last_shown_expected_start) WHERE id = $1', [
-    id,
-    new Date(ctx.now),
-    slot ? new Date(slot.start) : null,
-  ]);
+  await q.query('UPDATE bookings SET called_at = $2 WHERE id = $1', [id, new Date(ctx.now)]);
+  // The call tells the customer a time: his new ق5 reference (an advance is remembered for ق23).
+  if (slot) await updateReference(q, id, slot.start);
   await insertBookingEvent(q, {
     bookingId: id,
     type: 'called',

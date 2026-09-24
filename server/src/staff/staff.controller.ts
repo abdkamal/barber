@@ -80,6 +80,15 @@ export class StaffController {
       if (id === me.subjectId && (roleChanged || deactivated)) {
         throw Errors.conflict('CANNOT_CHANGE_OWN_ACCESS', 'لا يمكنك تغيير صلاحياتك أو إيقاف حسابك بنفسك');
       }
+      // Review L5: the salon owner cannot be demoted or deactivated by another manager, and the
+      // salon always keeps at least one active manager.
+      if (before.is_owner && (roleChanged || deactivated)) {
+        throw Errors.conflict('OWNER_PROTECTED', 'لا يمكن تغيير صلاحيات مالك الصالون أو إيقاف حسابه');
+      }
+      const losesManager = before.role === 'manager' && before.active && ((roleChanged && body.role !== 'manager') || deactivated);
+      if (losesManager && (await StaffRepo.countActiveManagers(q)) <= 1) {
+        throw Errors.conflict('LAST_MANAGER', 'يجب أن يبقى للصالون مدير نشط واحد على الأقل');
+      }
       const s = await StaffRepo.update(q, id, body, roleChanged || deactivated);
       if (roleChanged || deactivated) await SessionsRepo.revokeAllFor(q, 'staff', id, roleChanged ? 'role_changed' : 'deactivated');
       if (roleChanged || body.active !== undefined) {

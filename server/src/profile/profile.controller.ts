@@ -15,7 +15,20 @@ import { PhotosRepo, ProfileRepo, SalonPhotoRow, SalonProfileRow } from './profi
 
 const SocialLink = z.object({
   platform: z.string().trim().min(1).max(40),
-  url: z.string().trim().url().max(300),
+  // Review L3: https links only (no javascript:, data:, http: … on the public salon page).
+  url: z
+    .string()
+    .trim()
+    .max(300)
+    .url()
+    .refine((u) => {
+      try {
+        const p = new URL(u);
+        return p.protocol === 'https:' && !!p.hostname && !p.username && !p.password;
+      } catch {
+        return false;
+      }
+    }, { message: 'https_only' }),
 });
 
 // All fields optional except `name` (design §2/§10, ق37) — PUT is a partial update: fields left

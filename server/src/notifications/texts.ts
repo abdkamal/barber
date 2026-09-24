@@ -30,6 +30,10 @@ export const Texts = {
     title: 'أُلغي حجزك',
     body: `نعتذر، أُلغي حجزك لتجاوز وقت الإغلاق — ${reason}`,
   }),
+  dayClosed: (): Text => ({
+    title: 'أُلغي حجزك',
+    body: 'نعتذر، انتهى يوم العمل قبل أن يحين دورك فأُلغي حجزك — يمكنك الحجز من جديد',
+  }),
   transferred: (barber: string, eta: number, tz: string): Text => ({
     title: 'نُقل حجزك',
     body: `نُقل حجزك إلى ${barber} — الوقت المتوقع ${formatArabicTime(eta, tz)}`,

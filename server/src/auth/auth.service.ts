@@ -4,7 +4,7 @@ import { APP_CONFIG, AppConfig } from '../config/config';
 import { Errors } from '../common/errors';
 import { normalizePhone, normalizeSalonCode, normalizeUsername, SALON_CODE_RE, USERNAME_RE } from '../common/normalize';
 import { isUniqueViolation } from '../db/sql';
-import { CustomersRepo } from '../customers/customers.repository';
+import { type CustomerRow, CustomersRepo } from '../customers/customers.repository';
 import { writeAudit } from '../security/audit';
 import { SettingsRepo } from '../settings/settings.repository';
 import { StaffRepo } from '../staff/staff.repository';
@@ -83,6 +83,7 @@ export class AuthService {
     }
     const { tenant: t, record } = found;
     await this.checkBackoff(t, 'staff_login', username, ip);
+    await this.throttle.slowDown(t, 'staff_login', username);
 
     const staff = await StaffRepo.findByUsername(t.db, username);
     const ok = staff ? await this.hasher.verify(staff.password_hash, dto.password) : await this.hasher.verifyDummy(dto.password);
@@ -125,6 +126,12 @@ export class AuthService {
     return found.tenant;
   }
 
+  /**
+   * Review L4: registering with a number that already has an account must not reveal it. When the
+   * password matches that account this simply signs in (same response shape as a new account);
+   * otherwise the answer is the generic REGISTRATION_FAILED — the same code as a registration that
+   * failed for any other non-validation reason — suggesting sign-in / a reset code instead.
+   */
   async customerRegister(
     dto: { salonCode: string; name: string; phone: string; password: string },
     ip: string,
@@ -134,14 +141,15 @@ export class AuthService {
     if (!phone) throw Errors.validation([{ path: 'phone', code: 'invalid_phone' }]);
     const min = passwordPolicyError('customer', dto.password);
     if (min !== null) throw Errors.weakPassword(min);
+    const existing = await CustomersRepo.findAccountByPhone(t.db, phone);
+    if (existing) return this.registerExisting(t, existing, dto.password, phone, ip);
     const passwordHash = await this.hasher.hash(dto.password);
     const settings = await SettingsRepo.get(t.db);
 
     try {
       return await t.db.tx(async (q) => {
-        if (await CustomersRepo.findAccountByPhone(q, phone)) throw Errors.phoneTaken();
-        // ق20: automatic linking to an earlier walk-in record only when manager approval is on
-        // (the manager then confirms it while approving); otherwise staff link it manually later.
+        // ق20 / review H2: a matching walk-in record is only PROPOSED (when approval is on); it is
+        // linked when the manager approves the account. Without approval staff link it manually.
         const walkIn = settings.require_account_approval ? await CustomersRepo.findUnlinkedWalkIn(q, phone) : null;
         const status = settings.require_account_approval ? 'pending' : 'active';
         const c = await CustomersRepo.insertAccount(q, {
@@ -149,7 +157,7 @@ export class AuthService {
           phone,
           passwordHash,
           status,
-          linkedWalkInId: walkIn?.id ?? null,
+          proposedWalkInId: walkIn?.id ?? null,
         });
         await writeAudit(q, {
           actorKind: 'customer',
@@ -158,14 +166,30 @@ export class AuthService {
           targetKind: 'customer',
           targetId: c.id,
           ip,
-          details: { status, linkedWalkInId: walkIn?.id ?? null },
+          details: { status, proposedWalkInId: walkIn?.id ?? null },
         });
         return this.createSession(t, q, { kind: 'customer', id: c.id, role: 'customer', tokenVersion: c.token_version, name: c.name, status });
       });
     } catch (e) {
-      if (isUniqueViolation(e, 'customers_account_phone_key')) throw Errors.phoneTaken();
+      if (isUniqueViolation(e, 'customers_account_phone_key')) throw Errors.registrationFailed();
       throw e;
     }
+  }
+
+  /** Registration for a number that already has an account: sign in if the password matches, else generic failure. */
+  private async registerExisting(t: TenantContext, c: CustomerRow, password: string, phone: string, ip: string): Promise<SessionResponse> {
+    await this.checkBackoff(t, 'customer_login', phone, ip);
+    await this.throttle.slowDown(t, 'customer_login', phone);
+    const ok = c.password_hash ? await this.hasher.verify(c.password_hash, password) : await this.hasher.verifyDummy(password);
+    if (!ok || c.status === 'suspended') {
+      if (!ok) await this.throttle.recordFailure(t, 'customer_login', phone, ip);
+      throw Errors.registrationFailed();
+    }
+    await this.throttle.recordSuccess(t, 'customer_login', phone, ip);
+    return t.db.tx(async (q) => {
+      await CustomersRepo.recordLoginSuccess(q, c.id);
+      return this.createSession(t, q, { kind: 'customer', id: c.id, role: 'customer', tokenVersion: c.token_version, name: c.name, status: c.status });
+    });
   }
 
   async customerLogin(dto: { salonCode: string; phone: string; password: string }, ip: string): Promise<SessionResponse> {
@@ -176,6 +200,7 @@ export class AuthService {
       throw Errors.invalidCredentials();
     }
     await this.checkBackoff(t, 'customer_login', phone, ip);
+    await this.throttle.slowDown(t, 'customer_login', phone);
     const c = await CustomersRepo.findAccountByPhone(t.db, phone);
     const ok = c?.password_hash ? await this.hasher.verify(c.password_hash, dto.password) : await this.hasher.verifyDummy(dto.password);
     if (!c || !ok) {

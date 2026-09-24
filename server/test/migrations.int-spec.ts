@@ -92,7 +92,7 @@ describe('migration runner', () => {
     const bad = mkdtempSync(join(tmpdir(), 'saloni-bad-'));
     try {
       cpSync(DEFAULT_MIGRATIONS_ROOT, bad, { recursive: true });
-      writeFileSync(join(bad, 'salon', '005_gap.sql'), 'SELECT 1;');
+      writeFileSync(join(bad, 'salon', '006_gap.sql'), 'SELECT 1;');
       expect(() => loadMigrations('salon', bad)).toThrow(/without gaps/);
       appendFileSync(join(bad, 'directory', 'oops.sql'), '');
       expect(() => loadMigrations('directory', bad)).toThrow(/Bad migration file name/);

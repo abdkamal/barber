@@ -31,15 +31,19 @@ import {
   type Effects,
   emitChange,
   estimateFor,
+  exemptionReference,
   insertBookingEvent,
   loadDay,
+  operationalShift,
   project,
   releaseExpiredOffers,
   resolveShift,
   shiftForDate,
   stateWire,
   toEntry,
+  updateReference,
 } from '../scheduling/day';
+import { closeStaleOpenBreaks } from '../scheduling/day-close';
 import { PostCommit } from '../scheduling/post-commit';
 import type { ReasonCode } from '../scheduling/reasons';
 import { type BookingRow, currentSeq } from '../scheduling/rows';
@@ -81,10 +85,22 @@ interface EvCtx {
   ev: DeviceEventIn;
   at: number;
   approximate: boolean;
+  /** L1: the device time was outside the plausible range and was clamped (sample excluded). */
+  clamped: boolean;
   deviceId: string;
   now: number;
   flagged: boolean;
+  batch: BatchState;
 }
+
+/** Per-batch bookkeeping: conflict rows for the manager are capped per batch (review M4). */
+interface BatchState {
+  conflicts: number;
+  suppressed: number;
+}
+
+/** At most this many `sync_conflicts` rows per batch; the rest are counted in one summary row. */
+export const MAX_CONFLICTS_PER_BATCH = 10;
 
 const Steps = z.object({ steps: z.number().int().min(1).max(50).default(1) }).passthrough();
 const ServicesPayload = z.object({ serviceIds: z.array(z.string().uuid()).min(1).max(10) }).passthrough();
@@ -94,6 +110,31 @@ const BreakPayload = z
   .object({ kind: z.enum(['rest', 'prayer', 'emergency']), durationMin: z.number().int().min(1).max(240).optional() })
   .passthrough();
 const AbsentPayload = z.object({ reason: z.string().max(300).optional() }).passthrough();
+
+/** Known device event types and their payload schemas (validated before any DB work — review M4). */
+const EVENT_TYPES: Record<string, { payload?: z.ZodTypeAny; booking: boolean }> = {
+  service_started: { booking: true },
+  service_finished: { booking: true },
+  services_changed: { payload: ServicesPayload, booking: true },
+  payment_confirmed: { payload: PaymentPayload, booking: true },
+  postponed: { payload: Steps, booking: true },
+  waited: { booking: true },
+  no_show: { booking: true },
+  closing_decision: { payload: ClosingPayload, booking: true },
+  break_started: { payload: BreakPayload, booking: false },
+  break_ended: { booking: false },
+  absent_today: { payload: AbsentPayload, booking: false },
+};
+
+/** Why an event is junk before touching the database (null = well-formed). */
+export function precheckEvent(ev: DeviceEventIn): string | null {
+  const spec = EVENT_TYPES[ev.type];
+  if (!spec) return 'UNKNOWN_EVENT_TYPE';
+  if (!Number.isFinite(Date.parse(ev.occurredAt))) return 'INVALID_TIME';
+  if (spec.booking && !isUuid(ev.bookingId)) return 'BOOKING_REQUIRED';
+  if (spec.payload && !spec.payload.safeParse(ev.payload ?? {}).success) return 'INVALID_PAYLOAD';
+  return null;
+}
 
 const MAX_FUTURE_SKEW_MS = 2 * MINUTE;
 const MAX_EVENT_AGE_MS = 48 * 60 * MINUTE;
@@ -115,23 +156,78 @@ export class SyncService {
   async applyBatch(t: TenantContext, me: Principal, events: DeviceEventIn[], opts: { revokedAt?: number } = {}): Promise<EventOutcome[]> {
     const sorted = [...events].sort((a, b) => a.deviceSeq - b.deviceSeq);
     const out = new Map<string, EventOutcome>();
-    for (const ev of sorted) out.set(ev.id, await this.applyOne(t, me, ev, opts));
+    const batch: BatchState = { conflicts: 0, suppressed: 0 };
+    // Review M4: malformed events are rejected before any per-event DB work — recorded in one
+    // statement (so retries are recognised as duplicates) and summarised in ONE conflict row.
+    const ids = [...new Set(events.map((e) => e.id))];
+    const { rows: known } = await t.db.query<{ id: string; result: string }>('SELECT id, result FROM device_events WHERE id = ANY($1::uuid[])', [ids]);
+    const seen = new Map(known.map((r) => [r.id, r.result]));
+    const junk: Array<{ ev: DeviceEventIn; reason: string }> = [];
+    for (const ev of sorted) {
+      if (seen.has(ev.id)) {
+        out.set(ev.id, { eventId: ev.id, result: 'duplicate', reason: seen.get(ev.id)! });
+        continue;
+      }
+      const reason = precheckEvent(ev);
+      if (reason) {
+        junk.push({ ev, reason });
+        out.set(ev.id, { eventId: ev.id, result: 'rejected', reason });
+        seen.set(ev.id, 'rejected');
+      }
+    }
+    if (junk.length) await this.recordJunk(t, me, junk);
+    for (const ev of sorted) if (!out.has(ev.id)) out.set(ev.id, await this.applyOne(t, me, ev, opts, batch));
+    if (batch.suppressed) {
+      await t.db.query('INSERT INTO sync_conflicts (staff_id, kind, details) VALUES ($1, $2, $3)', [
+        me.subjectId,
+        'rejected_events_summary',
+        JSON.stringify({ count: batch.suppressed }),
+      ]);
+    }
     // Results in the order the device sent them.
     return events.map((e) => out.get(e.id)!);
   }
 
-  private async applyOne(t: TenantContext, me: Principal, ev: DeviceEventIn, opts: { revokedAt?: number }): Promise<EventOutcome> {
+  private async recordJunk(t: TenantContext, me: Principal, junk: Array<{ ev: DeviceEventIn; reason: string }>): Promise<void> {
+    await t.db.tx(async (q) => {
+      await q.query(
+        `INSERT INTO device_events (id, staff_id, device_id, device_seq, type, booking_id, payload, occurred_at, approximate, result, reason, flagged)
+         SELECT x.id, $1, $2, x.seq, x.type, x.booking_id, '{}'::jsonb, $3, false, 'rejected', x.reason, true
+           FROM unnest($4::uuid[], $5::bigint[], $6::text[], $7::uuid[], $8::text[]) AS x(id, seq, type, booking_id, reason)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          me.subjectId,
+          me.sessionId,
+          new Date(this.clock.now()),
+          junk.map((j) => j.ev.id),
+          junk.map((j) => j.ev.deviceSeq),
+          junk.map((j) => String(j.ev.type).slice(0, 40)),
+          junk.map((j) => (isUuid(j.ev.bookingId) ? j.ev.bookingId : null)),
+          junk.map((j) => j.reason),
+        ],
+      );
+      await q.query('INSERT INTO sync_conflicts (staff_id, kind, details) VALUES ($1, $2, $3)', [
+        me.subjectId,
+        'rejected_events',
+        JSON.stringify({ count: junk.length, samples: junk.slice(0, 5).map((j) => ({ eventId: j.ev.id, type: String(j.ev.type).slice(0, 40), reason: j.reason })) }),
+      ]);
+    });
+  }
+
+  private async applyOne(t: TenantContext, me: Principal, ev: DeviceEventIn, opts: { revokedAt?: number }, batch: BatchState = { conflicts: 0, suppressed: 0 }): Promise<EventOutcome> {
     const prior = await t.db.query<{ result: string; reason: string | null }>('SELECT result, reason FROM device_events WHERE id = $1', [ev.id]);
     if (prior.rows[0]) return { eventId: ev.id, result: 'duplicate', reason: prior.rows[0].result };
     const now = this.clock.now();
     let at = Date.parse(ev.occurredAt);
     let approximate = !!ev.approximate;
-    const c: EvCtx = { t, me, ev, at, approximate, deviceId: me.sessionId, now, flagged: false };
+    const c: EvCtx = { t, me, ev, at, approximate, clamped: false, deviceId: me.sessionId, now, flagged: false, batch };
     try {
       if (!Number.isFinite(at)) throw new Reject('INVALID_TIME');
       if (at > now + MAX_FUTURE_SKEW_MS) {
+        // L1: never in the future beyond a small skew — clamped to now, its duration sample excluded.
         at = now;
         approximate = true;
+        c.clamped = true;
       }
       if (at < now - MAX_EVENT_AGE_MS) throw new Reject('EVENT_TOO_OLD');
       if (opts.revokedAt !== undefined) {
@@ -188,6 +284,11 @@ export class SyncService {
         ],
       );
       if (!ins.rowCount) return;
+      if (c.batch.conflicts >= MAX_CONFLICTS_PER_BATCH) {
+        c.batch.suppressed++;
+        return;
+      }
+      c.batch.conflicts++;
       const bookingId = isUuid(c.ev.bookingId) && (await loadBooking(q, c.ev.bookingId!)) ? c.ev.bookingId! : null;
       await q.query('INSERT INTO sync_conflicts (staff_id, booking_id, device_event_id, kind, details) VALUES ($1, $2, $3, $4, $5)', [
         me.subjectId,
@@ -262,7 +363,7 @@ export class SyncService {
     const lookahead = settings.booking_opens_before_minutes * MINUTE;
     const shift =
       (await resolveShift(q, c.t.salon.timezone, c.me.subjectId, c.at, lookahead)) ??
-      (await resolveShift(q, c.t.salon.timezone, c.me.subjectId, c.now, lookahead));
+      (await operationalShift(q, c.t.salon.timezone, c.me.subjectId, c.now, lookahead));
     if (!shift) throw new Reject('NOT_WORKING');
     const ctx = await loadDay(q, c.t.salon, c.me.subjectId, shift, c.now, { lock: true, settings });
     await releaseExpiredOffers(q, ctx, effects);
@@ -285,6 +386,13 @@ export class SyncService {
     });
   }
 
+  /** L1: moves an implausible device time into range; the event becomes approximate (never learned from). */
+  private clamp(c: EvCtx, at: number): void {
+    c.at = at;
+    c.approximate = true;
+    c.clamped = true;
+  }
+
   private async commit(q: TenantQueryable, ctx: DayCtx, next: QueueEntry[], reason: ReasonCode, primary: string[], effects: Effects, c: EvCtx) {
     return commitQueue(q, ctx, next, { reason, primary, effects, actorKind: 'staff', actorId: c.me.subjectId });
   }
@@ -294,7 +402,7 @@ export class SyncService {
     const row = ctx.byId.get(id)!;
     const slot = project(ctx).find((s) => s.bookingId === id);
     if (!slot) return;
-    await q.query('UPDATE bookings SET last_shown_expected_start = $2 WHERE id = $1', [id, new Date(slot.start)]);
+    await updateReference(q, id, slot.start, { reset: true });
     await this.notifications.toCustomer(q, effects, row.customer_id, {
       type: 'postponed',
       bookingId: id,
@@ -315,6 +423,10 @@ export class SyncService {
     if (row.status === 'in_service' || row.status === 'done') throw new Reject('ALREADY_STARTED');
     if (row.status === 'offered' || row.status === 'expired') throw new Reject('NOT_CONFIRMED');
     const ctx = await this.lockDay(q, c, row, effects);
+    // L1: a service cannot start before its booking existed (server time of creation).
+    const { rows: born } = await q.query<{ at: Date | null }>('SELECT min(occurred_at) AS at FROM booking_events WHERE booking_id = $1', [row.id]);
+    const createdAt = born[0]?.at?.getTime();
+    if (createdAt !== undefined && c.at < createdAt) this.clamp(c, createdAt);
     let queue = ctx.queue;
     let conflict: string | null = null;
     if (row.status === 'cancelled' || row.status === 'no_show') {
@@ -336,7 +448,7 @@ export class SyncService {
     if (skipped) {
       // ق22: skipping the called customer counts as his postponement — unless ق23 exempts him.
       const s = ctx.byId.get(skipped)!;
-      const ref = (s.last_shown_expected_start ?? s.original_expected_start)?.getTime();
+      const ref = exemptionReference(s);
       const slot = before.find((x) => x.bookingId === skipped);
       const prevUsed = queue.find((e) => e.bookingId === skipped)!.postponeUsed;
       if (ref !== undefined && slot && postponeIsExempt(ref, slot.start, ctx.policy)) {
@@ -349,7 +461,8 @@ export class SyncService {
     await emitBooking(q, ctx, row.id, 'booking_updated', effects);
     if (skipped) {
       await insertBookingEvent(q, { bookingId: skipped, type: 'postponed', payload: { steps: 1, skippedBy: row.id }, occurredAt: c.at, actorKind: 'staff', actorId: c.me.subjectId, reason: 'skipped' });
-      await q.query("UPDATE bookings SET last_change_reason = 'skipped', last_change_at = $2 WHERE id = $1", [skipped, new Date(c.now)]);
+      // ق22: the skipped customer is no longer the called one — he waits to be called again.
+      await q.query("UPDATE bookings SET called_at = NULL, last_change_reason = 'skipped', last_change_at = $2 WHERE id = $1", [skipped, new Date(c.now)]);
       await this.notifyPostponed(q, ctx, effects, skipped, 1);
       await emitBooking(q, ctx, skipped, 'booking_updated', effects);
     }
@@ -373,7 +486,8 @@ export class SyncService {
     if (row.status !== 'in_service' || !row.actual_start) throw new Reject('NOT_IN_SERVICE');
     const ctx = await this.lockDay(q, c, row, effects);
     const start = row.actual_start.getTime();
-    const end = Math.max(c.at, start);
+    if (c.at < start) this.clamp(c, start); // L1: never before the start transition
+    const end = c.at;
     await q.query("UPDATE bookings SET status = 'done', actual_end = $2, queue_position = NULL, updated_at = now() WHERE id = $1", [row.id, new Date(end)]);
     await this.commit(q, ctx, finishService(ctx.queue, row.id), 'finished', [row.id], effects, c);
     await this.event(q, c, row.id, 'service_finished', { durationSec: Math.round((end - start) / 1000) });
@@ -393,7 +507,7 @@ export class SyncService {
         row.id,
         Math.max(0, Math.round((end - start) / 1000)),
         measured === null,
-        measured === null ? (c.approximate || approxStart.length ? 'approximate_time' : 'invalid_times') : null,
+        measured === null ? (c.clamped ? 'clamped_time' : c.approximate || approxStart.length ? 'approximate_time' : 'invalid_times') : null,
       ],
     );
     if (measured !== null) await this.checkBaseDuration(q, effects, ctx, row);
@@ -478,18 +592,29 @@ export class SyncService {
       await this.event(q, c, row.id, 'payment_confirmed', { alreadyConfirmed: true });
       return { reason: 'ALREADY_CONFIRMED' };
     }
-    const finalAmount = amount ?? Number(p.amount_minor);
+    // The server's price snapshot is the expected amount and is never overwritten by the device;
+    // the amount the device reports is recorded next to it and a difference is flagged (review L2).
+    const expected = Number(p.amount_minor);
+    const confirmed = amount ?? expected;
+    const discrepancy = confirmed !== expected;
     await q.query(
-      "UPDATE payments SET status = 'confirmed', amount_minor = $2, confirmed_by_staff_id = $3, confirmed_at = $4, updated_at = now() WHERE id = $1",
-      [p.id, finalAmount, c.me.subjectId, new Date(c.at)],
+      `UPDATE payments SET status = 'confirmed', confirmed_amount_minor = $2, discrepancy = $5, confirmed_by_staff_id = $3, confirmed_at = $4, updated_at = now()
+        WHERE id = $1`,
+      [p.id, confirmed, c.me.subjectId, new Date(c.at), discrepancy],
     );
-    await this.event(q, c, row.id, 'payment_confirmed', { amount: finalAmount, expected: Number(p.amount_minor) });
+    await this.event(q, c, row.id, 'payment_confirmed', { amount: confirmed, expected, discrepancy });
     await writeAudit(q, {
       actorKind: 'staff', actorId: c.me.subjectId, action: 'payment.confirmed', targetKind: 'booking', targetId: row.id,
-      details: { amount: finalAmount, expected: Number(p.amount_minor), viaDevice: true },
+      details: { amount: confirmed, expected, discrepancy, viaDevice: true },
     });
-    await emitChange(q, effects, { staffId: row.staff_id, type: 'payment_updated', entity: 'payment', bookingId: row.id, data: { bookingId: row.id, status: 'confirmed', amountCents: finalAmount } });
-    return {};
+    await emitChange(q, effects, {
+      staffId: row.staff_id,
+      type: 'payment_updated',
+      entity: 'payment',
+      bookingId: row.id,
+      data: { bookingId: row.id, status: 'confirmed', amountCents: expected, confirmedAmountCents: confirmed, discrepancy },
+    });
+    return discrepancy ? { reason: 'AMOUNT_DIFFERS_FROM_PRICE' } : {};
   }
 
   /** ق10/ق21/ق23: once per booking, N turns back, the next customer is called at once. */
@@ -501,7 +626,7 @@ export class SyncService {
     const ctx = await this.lockDay(q, c, row, effects);
     const entry = ctx.queue.find((e) => e.bookingId === row.id);
     if (!entry) throw new Reject('BOOKING_NOT_ACTIVE');
-    const ref = (row.last_shown_expected_start ?? row.original_expected_start)?.getTime();
+    const ref = exemptionReference(ctx.byId.get(row.id) ?? row);
     const slot = project(ctx).find((s) => s.bookingId === row.id)!;
     const exempt = ref !== undefined && postponeIsExempt(ref, slot.start, ctx.policy);
     if (entry.postponeUsed && !exempt) throw new Reject('POSTPONE_ALREADY_USED');
@@ -569,6 +694,8 @@ export class SyncService {
   private async breakStarted(q: TenantQueryable, effects: Effects, c: EvCtx): Promise<Applied> {
     const { kind, durationMin } = BreakPayload.parse(c.ev.payload ?? {});
     const ctx = await this.lockToday(q, c, effects);
+    // An open break left over from an earlier day must not block today's (review, minor).
+    await closeStaleOpenBreaks(q, c.t.salon.timezone, c.me.subjectId, c.now, effects, ctx.shift.workDate);
     const { rows: open } = await q.query('SELECT 1 FROM breaks WHERE staff_id = $1 AND open', [c.me.subjectId]);
     if (open.length) throw new Reject('BREAK_ALREADY_OPEN');
     const before = project(ctx);

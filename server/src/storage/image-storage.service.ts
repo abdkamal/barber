@@ -56,6 +56,16 @@ function safeAbsolutePath(salonId: string, filename: string): string | null {
   return abs;
 }
 
+/**
+ * Review H3: image processing (sharp/libvips) is exposed only to salons the vendor has activated —
+ * a self-registered, not yet reviewed salon cannot upload files.
+ */
+export function assertUploadsAllowed(salon: { status: string }): void {
+  if (salon.status !== 'active') {
+    throw Errors.conflict('SALON_NOT_ACTIVE', 'رفع الصور متاح بعد تفعيل الصالون');
+  }
+}
+
 export interface StoredImage {
   /** `{salonId}/{randomName}.{ext}` — what gets saved as e.g. salon_photos.path / logo_path. */
   path: string;

@@ -49,7 +49,8 @@ describe('scheduler', () => {
 
     const appended = await book(ctx, await newCustomer(ctx, s), { serviceIds: svc(s), barberId: b1!.id, kind: 'queue' });
     expect(appended.status).toBe(201);
-    expect(appended.body.eta).toBe(isoAt(150));
+    // Frozen at the drop, but no waiting booking is projected into the past (engine): 5 × 30 min from now (+2).
+    expect(appended.body.eta).toBe(isoAt(152));
     expect(appended.body.queuePosition).toBe(5);
     const auto = await book(ctx, await newCustomer(ctx, s), { serviceIds: svc(s), kind: 'queue' });
     expect(auto.body.barberId).toBe(b2!.id);

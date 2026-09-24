@@ -38,7 +38,15 @@ export class ReportsController {
       ReportsRepo.pendingItems(t.db),
     ]);
 
-    const revenueTotal = revenue.reduce((a, r) => ({ confirmed: a.confirmed + r.confirmed, awaiting: a.awaiting + r.awaiting }), { confirmed: 0, awaiting: 0 });
+    const revenueTotal = revenue.reduce(
+      (a, r) => ({
+        confirmed: a.confirmed + r.confirmed,
+        expectedConfirmed: a.expectedConfirmed + r.expectedConfirmed,
+        awaiting: a.awaiting + r.awaiting,
+        discrepancies: a.discrepancies + r.discrepancies,
+      }),
+      { confirmed: 0, expectedConfirmed: 0, awaiting: 0, discrepancies: 0 },
+    );
     const visitsWithPostpone = visits.map((v) => ({ ...v, postponed: postponements.get(v.staffId) ?? 0 }));
 
     return {

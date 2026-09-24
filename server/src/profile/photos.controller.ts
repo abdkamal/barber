@@ -7,7 +7,7 @@ import type { Principal } from '../auth/principal';
 import { Errors } from '../common/errors';
 import { writeAudit } from '../security/audit';
 import { clientIp } from '../security/client-ip';
-import { ImageStorageService, MAX_UPLOAD_BYTES, splitStoredPath } from '../storage/image-storage.service';
+import { assertUploadsAllowed, ImageStorageService, MAX_UPLOAD_BYTES, splitStoredPath } from '../storage/image-storage.service';
 import type { TenantContext } from '../tenancy/tenant-context';
 import { CurrentPrincipal, Tenant } from '../tenancy/tenant.decorator';
 import { mediaUrl } from '../storage/media-url';
@@ -30,6 +30,7 @@ export class PhotosController {
     @UploadedFile() file: Express.Multer.File | undefined,
     @Req() req: Request,
   ) {
+    assertUploadsAllowed(t.salon);
     if (!file?.buffer?.length) throw Errors.validation([{ path: 'file', code: 'required' }]);
     return t.db.tx(async (q) => {
       const position = await PhotosRepo.nextFreePosition(q);
@@ -68,6 +69,7 @@ export class PhotosController {
     @UploadedFile() file: Express.Multer.File | undefined,
     @Req() req: Request,
   ) {
+    assertUploadsAllowed(t.salon);
     if (!file?.buffer?.length) throw Errors.validation([{ path: 'file', code: 'required' }]);
     const stored = await this.storage.store(t.salonId, file.buffer, { maxDimensionPx: 800 });
     const old = await t.db.tx(async (q) => {

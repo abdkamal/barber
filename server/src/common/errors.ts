@@ -31,7 +31,13 @@ export const Errors = {
   salonSuspended: () => new ApiError(HttpStatus.FORBIDDEN, 'SALON_SUSPENDED', 'هذا الصالون موقوف حاليًا'),
   salonNotFound: () => new ApiError(HttpStatus.NOT_FOUND, 'SALON_NOT_FOUND', 'لم نجد صالونًا بهذا الرمز'),
   notFound: () => new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND', 'العنصر غير موجود'),
-  phoneTaken: () => new ApiError(HttpStatus.CONFLICT, 'PHONE_ALREADY_REGISTERED', 'رقم الهاتف مسجل مسبقًا'),
+  /** Review L4: generic — never says whether the number already has an account. */
+  registrationFailed: () =>
+    new ApiError(
+      HttpStatus.CONFLICT,
+      'REGISTRATION_FAILED',
+      'تعذّر إنشاء الحساب بهذه البيانات. إن كان لديك حساب في هذا الصالون فسجّل الدخول، أو اطلب رمز إعادة التعيين من الصالون',
+    ),
   usernameTaken: () => new ApiError(HttpStatus.CONFLICT, 'USERNAME_TAKEN', 'اسم المستخدم مستخدم مسبقًا'),
   invalidResetCode: () =>
     new ApiError(HttpStatus.BAD_REQUEST, 'INVALID_RESET_CODE', 'رمز إعادة التعيين غير صحيح أو منتهي'),
@@ -49,3 +55,7 @@ export const Errors = {
   conflict: (code: string, message: string) => new ApiError(HttpStatus.CONFLICT, code, message),
   internal: () => new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, 'INTERNAL_ERROR', 'حدث خطأ غير متوقع'),
 };
+
+/** Review L8: upper bounds for money (minor units: 1,000,000.00) and a single service's base duration (8 h). */
+export const MAX_PRICE_MINOR = 100_000_000;
+export const MAX_SERVICE_MINUTES = 480;

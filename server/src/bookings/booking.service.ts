@@ -26,11 +26,15 @@ import {
   type Effects,
   estimateFor,
   insertBookingEvent,
+  isStaleDay,
   loadDay,
+  lockDays,
   project,
   releaseExpiredOffers,
+  schedulesOf,
   shiftForDate,
   stateWire,
+  updateReference,
   workingStaff,
 } from '../scheduling/day';
 import { bookingDtos, type BookingDto } from '../scheduling/dto';
@@ -38,8 +42,8 @@ import { QErrors } from '../scheduling/errors';
 import { once, type Outcome, unwrap } from '../scheduling/idempotency';
 import { PostCommit } from '../scheduling/post-commit';
 import { reasonText } from '../scheduling/reasons';
-import { activeServices, BOOKING_SELECT, type BookingRow, type ServiceRow } from '../scheduling/rows';
-import { currentShift, formatArabicTime } from '../scheduling/time';
+import { activeServices, BOOKING_SELECT, type BookingRow, type ServiceRow, type StaffInfo } from '../scheduling/rows';
+import { currentShift, formatArabicTime, type Shift } from '../scheduling/time';
 
 export interface PlaceBody {
   serviceIds: string[];
@@ -71,6 +75,9 @@ interface Chosen {
 
 const iso = (t: number) => new Date(t).toISOString();
 
+/** How far a reported "seen" time may be from the server's projection and still be recorded (H1). */
+export const SEEN_TOLERANCE_MS = 5 * MINUTE;
+
 /** Customer booking flows (api.md "الزبون"; design §3, §5.2–§5.12). */
 @Injectable()
 export class BookingService {
@@ -94,7 +101,8 @@ export class BookingService {
   private async activeCount(q: TenantQueryable, customerId: string, now: number, excluding: string | null = null): Promise<number> {
     const { rows } = await q.query<{ n: string }>(
       `SELECT count(*) AS n FROM bookings
-        WHERE customer_id = $1 AND status IN ('waiting', 'called', 'in_service') AND created_at > $2 AND ($3::uuid IS NULL OR id <> $3)`,
+        WHERE customer_id = $1 AND status IN ('waiting', 'called', 'in_service') AND day_closed_at IS NULL
+          AND created_at > $2 AND ($3::uuid IS NULL OR id <> $3)`,
       [customerId, new Date(now - ACTIVE_BOOKING_MAX_AGE_MS), excluding],
     );
     return Number(rows[0]!.n);
@@ -121,13 +129,19 @@ export class BookingService {
     return ctx;
   }
 
-  /** Expires the customer's other outstanding offers (one live offer per customer). */
-  private async dropOwnOffers(q: TenantQueryable, t: TenantContext, customerId: string, now: number, effects: Effects): Promise<void> {
+  private async ownOffers(q: TenantQueryable, customerId: string): Promise<BookingRow[]> {
     const { rows } = await q.query<BookingRow>(`${BOOKING_SELECT} WHERE b.customer_id = $1 AND b.status = 'offered'`, [customerId]);
-    for (const r of rows) {
-      const ctx = await this.lockDayOf(q, t, r, now, effects);
-      if (!ctx.byId.has(r.id)) continue;
+    return rows;
+  }
+
+  /** Expires the customer's other outstanding offers (one live offer per customer) — their days are already locked. */
+  private async dropOwnOffers(q: TenantQueryable, days: Map<string, DayCtx>, offers: BookingRow[], customerId: string, effects: Effects): Promise<void> {
+    for (const r of offers) {
+      const ctx = days.get(`${r.staff_id}|${r.work_date}`);
+      if (!ctx || !ctx.byId.has(r.id)) continue;
       await this.removeFromQueue(q, ctx, r.id, 'expired', 'offer_replaced', effects, { reason: 'offer_released', actorKind: 'customer', actorId: customerId });
+      ctx.rows = ctx.rows.filter((x) => x.id !== r.id);
+      ctx.byId.delete(r.id);
     }
   }
 
@@ -156,7 +170,16 @@ export class BookingService {
    * the placement: at the chosen barber, or the fastest one (§5.4). Enforces the booking window
    * (same day, opens before opening — §5.11), the day-state gate (§4, ق3/ق26) and ق4/ق19.
    */
-  private async choose(q: TenantQueryable, t: TenantContext, me: Principal, body: PlaceBody, settings: SettingsRow, now: number, effects: Effects): Promise<Chosen> {
+  private async choose(
+    q: TenantQueryable,
+    t: TenantContext,
+    me: Principal,
+    body: PlaceBody,
+    settings: SettingsRow,
+    now: number,
+    effects: Effects,
+    opts: { dropOffers?: boolean } = {},
+  ): Promise<Chosen> {
     const services = await resolveServices(q, body.serviceIds);
     const requestedAt = this.parseRequested(body);
     const all = await workingStaff(q);
@@ -176,14 +199,16 @@ export class BookingService {
     }
     open.sort((a, b) => (a.s.id < b.s.id ? -1 : 1));
     const seniority = new Map(all.map((s, i) => [s.id, i]));
-    const ctxs: DayCtx[] = [];
+    // Lock ordering (review): every day this operation touches — the candidates and the days of the
+    // customer's own offers it will drop — is locked (id order) before anything emits a change.
+    const offers = opts.dropOffers ? await this.ownOffers(q, me.subjectId) : [];
+    const specs: Array<{ staffId: string; shift: Shift; staff?: StaffInfo }> = open.map(({ s, shift }) => ({ staffId: s.id, shift, staff: s }));
+    for (const o of offers) specs.push({ staffId: o.staff_id, shift: await shiftForDate(q, t.salon.timezone, o.staff_id, o.work_date) });
+    const days = await lockDays(q, t.salon, specs, now, settings, effects);
+    await this.dropOwnOffers(q, days, offers, me.subjectId, effects);
+    const ctxs: DayCtx[] = open.map(({ s, shift }) => days.get(`${s.id}|${shift.workDate}`)!);
     const durations = new Map<string, { durationMs: number; setKey: string }>();
-    for (const { s, shift } of open) {
-      const ctx = await loadDay(q, t.salon, s.id, shift, now, { lock: true, settings, staff: s });
-      await releaseExpiredOffers(q, ctx, effects);
-      ctxs.push(ctx);
-      durations.set(s.id, await estimateFor(q, s.id, me.subjectId, body.serviceIds, sumMinutes(services)));
-    }
+    for (const { s } of open) durations.set(s.id, await estimateFor(q, s.id, me.subjectId, body.serviceIds, sumMinutes(services)));
     const req = { kind: body.kind, requestedAt };
     let placement: (Placement & { barberId: string }) | null = null;
     if (body.barberId) {
@@ -302,8 +327,7 @@ export class BookingService {
         const settings = await SettingsRepo.get(q);
         await this.assertBelowMax(q, me.subjectId, settings, now);
         // A new hour request supersedes any offer the customer still holds (one live offer each).
-        if (body.kind === 'requested') await this.dropOwnOffers(q, t, me.subjectId, now, effects);
-        const c = await this.choose(q, t, me, body, settings, now, effects);
+        const c = await this.choose(q, t, me, body, settings, now, effects, { dropOffers: body.kind === 'requested' });
         if (c.requestedAt === undefined || requestedHourOutcome(c.placement.start, c.requestedAt) === 'accept') {
           return { status: 200, body: this.quoteDto(c, 'accept') };
         }
@@ -405,10 +429,8 @@ export class BookingService {
   }
 
   private async recordTimeChange(q: TenantQueryable, ctx: DayCtx, id: string, before: BookingRow, start: number, customerId: string) {
-    await q.query(
-      `UPDATE bookings SET last_shown_expected_start = $2, last_change_reason = 'customer_change', last_change_at = $3 WHERE id = $1`,
-      [id, new Date(start), new Date(ctx.now)],
-    );
+    await q.query(`UPDATE bookings SET last_change_reason = 'customer_change', last_change_at = $2 WHERE id = $1`, [id, new Date(ctx.now)]);
+    await updateReference(q, id, start, { reset: true });
     await insertBookingEvent(q, {
       bookingId: id,
       type: 'time_changed',
@@ -436,11 +458,19 @@ export class BookingService {
     const now = this.clock.now();
     const { rows } = await t.db.query<BookingRow>(
       `${BOOKING_SELECT}
-        WHERE b.customer_id = $1 AND b.status IN ('waiting', 'called', 'in_service') AND b.created_at > $2
-        ORDER BY b.projected_start NULLS LAST, b.created_at LIMIT 1`,
+        WHERE b.customer_id = $1 AND b.status IN ('waiting', 'called', 'in_service') AND b.created_at > $2 AND b.day_closed_at IS NULL
+        ORDER BY b.projected_start NULLS LAST, b.created_at LIMIT 5`,
       [me.subjectId, new Date(now - ACTIVE_BOOKING_MAX_AGE_MS)],
     );
-    const row = rows[0];
+    // C1: a booking of a business day that is over is never "current", even before the scheduler closes it out.
+    const lookahead = (await SettingsRepo.get(t.db)).booking_opens_before_minutes * MINUTE;
+    let row: BookingRow | undefined;
+    for (const r of rows) {
+      if (!isStaleDay(await schedulesOf(t.db, r.staff_id), t.salon.timezone, r.work_date, now, lookahead)) {
+        row = r;
+        break;
+      }
+    }
     // No active booking is a normal state, not an error (api.md): 200 with `booking: null`.
     if (!row) return { booking: null, serverTime: iso(now) };
     const shift = await shiftForDate(t.db, t.salon.timezone, row.staff_id, row.work_date);
@@ -474,17 +504,27 @@ export class BookingService {
     };
   }
 
-  /** The app reports the time it actually displayed — the ق5 reference (§5.9). */
-  async seen(t: TenantContext, me: Principal, id: string, eta: number): Promise<void> {
-    const { rowCount } = await t.db.query(
-      `UPDATE bookings SET last_shown_expected_start = $3
-        WHERE id = $1 AND customer_id = $2 AND status IN ('waiting', 'called', 'in_service')`,
+  /**
+   * The app reports the time it actually displayed — the ق5 reference (§5.9). Review H1: the value
+   * comes from the client, so it is recorded only when it is within SEEN_TOLERANCE_MS of the
+   * server's own current projection (what the server showed, give or take a refresh); anything
+   * else is ignored. It never feeds the ق23 exemption (see `exemptionReference`).
+   */
+  async seen(t: TenantContext, me: Principal, id: string, eta: number): Promise<{ recorded: boolean }> {
+    const now = this.clock.now();
+    const row = await loadBooking(t.db, id);
+    if (!row || row.customer_id !== me.subjectId) throw QErrors.bookingNotFound();
+    if (!['waiting', 'called', 'in_service'].includes(row.status) || row.day_closed_at) throw QErrors.bookingNotActive();
+    if (row.status === 'in_service') return { recorded: false };
+    const shift = await shiftForDate(t.db, t.salon.timezone, row.staff_id, row.work_date);
+    const ctx = await loadDay(t.db, t.salon, row.staff_id, shift, now);
+    const slot = project(ctx).find((s) => s.bookingId === id);
+    if (!slot || Math.abs(eta - slot.start) > SEEN_TOLERANCE_MS) return { recorded: false };
+    await t.db.query(
+      `UPDATE bookings SET last_shown_expected_start = $3 WHERE id = $1 AND customer_id = $2 AND status IN ('waiting', 'called')`,
       [id, me.subjectId, new Date(eta)],
     );
-    if (!rowCount) {
-      const exists = await t.db.query('SELECT 1 FROM bookings WHERE id = $1 AND customer_id = $2', [id, me.subjectId]);
-      throw exists.rowCount ? QErrors.bookingNotActive() : QErrors.bookingNotFound();
-    }
+    return { recorded: true };
   }
 
   /** §5.12: one atomic re-insertion under ق4; otherwise the booking stays and the nearest time is offered (held). */
@@ -567,7 +607,9 @@ export class BookingService {
     const { rows } = await t.db.query<BookingRow & { staff_name: string; payment_status: string | null; payment_amount: string | null }>(
       `SELECT x.*, s.name AS staff_name, p.status AS payment_status, p.amount_minor AS payment_amount
          FROM (${BOOKING_SELECT}
-                WHERE (b.customer_id = $1 OR b.customer_id = (SELECT linked_walk_in_id FROM customers WHERE id = $1))
+                WHERE (b.customer_id = $1
+                       -- ق20 / review H2: a linked walk-in record is visible only to an ACTIVE account.
+                       OR b.customer_id = (SELECT linked_walk_in_id FROM customers WHERE id = $1 AND status = 'active' AND phone_released_at IS NULL))
                   AND b.status NOT IN ('offered', 'expired')) x
          JOIN staff s ON s.id = x.staff_id
          LEFT JOIN payments p ON p.booking_id = x.id

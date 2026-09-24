@@ -26,7 +26,7 @@ import {
   type StaffInfo,
   staffInfo,
 } from './rows';
-import { addDays, currentShift, dailyBreakInShift, localToUtc, type ScheduleRow, type Shift, shiftOn, weekday } from './time';
+import { addDays, currentShift, dailyBreakInShift, localDate, localToUtc, type ScheduleRow, type Shift, shiftOn, weekday } from './time';
 
 /** Heartbeats every 30 s; the barber is considered disconnected after 90 s without one (design §11). */
 export const HEARTBEAT_TIMEOUT_MS = 90_000;
@@ -76,6 +76,62 @@ export async function resolveShift(q: TenantQueryable, tz: string, staffId: stri
   return currentShift(await schedulesOf(q, staffId), tz, now, lookaheadMs);
 }
 
+/** Statuses that keep a business day "open" for its barber after closing time (C1). */
+export const OPEN_DAY_STATUSES = ['waiting', 'called', 'in_service'] as const;
+
+/** The shift of a work date, or the whole local day when the barber has no schedule that day. */
+export function shiftOrDay(schedules: readonly ScheduleRow[], tz: string, date: string): Shift {
+  return (
+    shiftOn(date, schedules, tz) ?? { workDate: date, workStart: localToUtc(date, '00:00', tz), workEnd: localToUtc(addDays(date, 1), '00:00', tz) }
+  );
+}
+
+/**
+ * A past business day is "stale" once the barber's next business day has begun (its booking window
+ * opened — `lookaheadMs` before opening); with no schedule in the following week, a day after it ended.
+ * Stale days are closed out by the scheduler (closeStaleDays) and never shown as current.
+ */
+export function isStaleDay(schedules: readonly ScheduleRow[], tz: string, date: string, now: number, lookaheadMs: number): boolean {
+  const own = shiftOrDay(schedules, tz, date);
+  if (now < own.workEnd) return false;
+  for (let k = 1; k <= 7; k++) {
+    const next = shiftOn(addDays(date, k), schedules, tz);
+    if (next && next.workStart > own.workStart) return now >= next.workStart - lookaheadMs;
+  }
+  return now >= own.workEnd + 24 * 60 * MINUTE;
+}
+
+/**
+ * The barber's operational day (C1): the running shift; otherwise the most recent ended shift that
+ * still has active bookings (served after closing — ق24 — or an unfinished service) and is not stale;
+ * otherwise the shift whose booking window is open. New bookings and walk-ins still use the current
+ * shift only (`resolveShift`), so nothing new is accepted after closing.
+ */
+export async function operationalShift(
+  q: TenantQueryable,
+  tz: string,
+  staffId: string,
+  now: number,
+  lookaheadMs: number,
+  schedules?: readonly ScheduleRow[],
+): Promise<Shift | null> {
+  const sch = schedules ?? (await schedulesOf(q, staffId));
+  const cur = currentShift(sch, tz, now, lookaheadMs);
+  if (cur && now >= cur.workStart) return cur;
+  const { rows } = await q.query<{ work_date: string }>(
+    `SELECT DISTINCT work_date::text AS work_date FROM bookings
+      WHERE staff_id = $1 AND status = ANY($2::text[]) AND day_closed_at IS NULL AND work_date <= $3::date
+      ORDER BY work_date DESC LIMIT 3`,
+    [staffId, OPEN_DAY_STATUSES, cur?.workDate ?? localDate(now, tz)],
+  );
+  for (const r of rows) {
+    if (cur && r.work_date === cur.workDate) continue;
+    const s = shiftOrDay(sch, tz, r.work_date);
+    if (s.workEnd <= now && !isStaleDay(sch, tz, r.work_date, now, lookaheadMs)) return s;
+  }
+  return cur;
+}
+
 /** Opening time (local) of a staff member's shift on a date — anchors recurring breaks (ق30). */
 export async function opensAtOn(q: TenantQueryable, staffId: string, date: string): Promise<string | null> {
   const wd = weekday(date);
@@ -84,8 +140,7 @@ export async function opensAtOn(q: TenantQueryable, staffId: string, date: strin
 
 /** The shift of a known work date (for events arriving late); falls back to the whole local day. */
 export async function shiftForDate(q: TenantQueryable, tz: string, staffId: string, date: string): Promise<Shift> {
-  const s = shiftOn(date, await schedulesOf(q, staffId), tz);
-  return s ?? { workDate: date, workStart: localToUtc(date, '00:00', tz), workEnd: localToUtc(addDays(date, 1), '00:00', tz) };
+  return shiftOrDay(await schedulesOf(q, staffId), tz, date);
 }
 
 /** Active staff who work (have a schedule on) the current business day — the salon's "barbers" today. */
@@ -266,6 +321,34 @@ export async function loadDay(
   };
 }
 
+/**
+ * Locks several barber days in one consistent order (staff id, then work date) and only then
+ * releases their expired offers — no change is emitted (the change counter row is locked by the
+ * first emitted change) before every day lock is held, so concurrent operations cannot deadlock.
+ * Keys of the result: `${staffId}|${workDate}`.
+ */
+export async function lockDays(
+  q: TenantQueryable,
+  salon: TenantSalon,
+  specs: Array<{ staffId: string; shift: Shift; staff?: StaffInfo }>,
+  now: number,
+  settings: SettingsRow,
+  effects: Effects,
+): Promise<Map<string, DayCtx>> {
+  const unique = new Map<string, (typeof specs)[number]>();
+  for (const s of specs) {
+    const k = `${s.staffId}|${s.shift.workDate}`;
+    if (!unique.has(k) || (s.staff && !unique.get(k)!.staff)) unique.set(k, s);
+  }
+  const ordered = [...unique.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const out = new Map<string, DayCtx>();
+  for (const [k, s] of ordered) {
+    out.set(k, await loadDay(q, salon, s.staffId, s.shift, now, { lock: true, settings, ...(s.staff ? { staff: s.staff } : {}) }));
+  }
+  for (const ctx of out.values()) await releaseExpiredOffers(q, ctx, effects);
+  return out;
+}
+
 export function project(ctx: DayCtx, queue: readonly QueueEntry[] = ctx.queue): ProjectedSlot[] {
   return projectQueue(ctx.day, queue, ctx.now, ctx.opts);
 }
@@ -420,6 +503,34 @@ export async function releaseExpiredOffers(q: TenantQueryable, ctx: DayCtx, effe
   for (const id of ids) ctx.byId.delete(id);
   ctx.expiredOffers = [];
   return ids.size;
+}
+
+// ─── ق5 reference / ق23 (server-known facts only) ─────────────────────────────────────
+
+/**
+ * Records a new time the SERVER told the customer (call, ق5 notice, postponement, transfer…) as his
+ * ق5 reference. When the system moves him earlier, the reference he had before that advance is kept
+ * in `reference_before_advance` — the ق23 exemption is judged against it (review I1/H1). `reset`
+ * forgets it (a postponement, a transfer or the customer's own change gives him a new known time).
+ */
+export async function updateReference(q: TenantQueryable, id: string, at: number, opts: { reset?: boolean } = {}): Promise<void> {
+  await q.query(
+    `UPDATE bookings SET
+        reference_before_advance = CASE
+          WHEN $3 THEN NULL
+          WHEN $2 < COALESCE(last_shown_expected_start, original_expected_start) - interval '1 minute'
+            THEN COALESCE(reference_before_advance, last_shown_expected_start, original_expected_start)
+          WHEN reference_before_advance IS NOT NULL AND $2 >= reference_before_advance THEN NULL
+          ELSE reference_before_advance END,
+        last_shown_expected_start = $2
+      WHERE id = $1`,
+    [id, new Date(at), !!opts.reset],
+  );
+}
+
+/** ق23: the time the customer is known (by the server) to have expected before any system advance. */
+export function exemptionReference(r: BookingRow): number | undefined {
+  return (r.reference_before_advance ?? r.last_shown_expected_start ?? r.original_expected_start)?.getTime();
 }
 
 // ─── Durations (ق11) ──────────────────────────────────────────────────────────────────

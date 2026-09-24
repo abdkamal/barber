@@ -10,6 +10,8 @@ export interface CustomerRow {
   status: CustomerStatus;
   no_show_count: number;
   linked_walk_in_id: string | null;
+  proposed_walk_in_id: string | null;
+  phone_released_at: Date | null;
   token_version: number;
   created_at: Date;
   last_login_at: Date | null;
@@ -18,14 +20,14 @@ export interface CustomerRow {
 export type CustomerPublic = Omit<CustomerRow, 'password_hash' | 'token_version'> & { is_walk_in: boolean };
 
 const PUBLIC_COLS =
-  'id, name, phone, status, no_show_count, linked_walk_in_id, created_at, last_login_at, (password_hash IS NULL) AS is_walk_in';
+  'id, name, phone, status, no_show_count, linked_walk_in_id, proposed_walk_in_id, phone_released_at, created_at, last_login_at, (password_hash IS NULL) AS is_walk_in';
 
 /** Customer queries. `q` must be a tenant-bound handle. */
 export const CustomersRepo = {
   /** App account (has a password) with this phone. */
   async findAccountByPhone(q: TenantQueryable, phone: string): Promise<CustomerRow | null> {
     const { rows } = await q.query<CustomerRow>(
-      'SELECT * FROM customers WHERE phone = $1 AND password_hash IS NOT NULL',
+      'SELECT * FROM customers WHERE phone = $1 AND password_hash IS NOT NULL AND phone_released_at IS NULL',
       [phone],
     );
     return rows[0] ?? null;
@@ -46,7 +48,7 @@ export const CustomersRepo = {
     const { rows } = await q.query<{ id: string }>(
       `SELECT c.id FROM customers c
         WHERE c.phone = $1 AND c.password_hash IS NULL
-          AND NOT EXISTS (SELECT 1 FROM customers a WHERE a.linked_walk_in_id = c.id)
+          AND NOT EXISTS (SELECT 1 FROM customers a WHERE a.linked_walk_in_id = c.id OR a.proposed_walk_in_id = c.id)
         ORDER BY c.created_at LIMIT 1`,
       [phone],
     );
@@ -55,12 +57,14 @@ export const CustomersRepo = {
 
   async insertAccount(
     q: TenantQueryable,
-    c: { name: string; phone: string; passwordHash: string; status: CustomerStatus; linkedWalkInId: string | null },
+    c: { name: string; phone: string; passwordHash: string; status: CustomerStatus; proposedWalkInId: string | null },
   ): Promise<CustomerRow> {
+    // ق20 / review H2: a matching walk-in record is only PROPOSED here; it becomes linked when the
+    // manager approves the account (CustomersController.approve).
     const { rows } = await q.query<CustomerRow>(
-      `INSERT INTO customers (name, phone, password_hash, status, linked_walk_in_id)
+      `INSERT INTO customers (name, phone, password_hash, status, proposed_walk_in_id)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [c.name, c.phone, c.passwordHash, c.status, c.linkedWalkInId],
+      [c.name, c.phone, c.passwordHash, c.status, c.proposedWalkInId],
     );
     return rows[0]!;
   },
@@ -73,6 +77,23 @@ export const CustomersRepo = {
       [status ?? null, limit, offset],
     );
     return rows;
+  },
+
+  /**
+   * On approval, a proposed walk-in link (registration match) becomes effective — if that record
+   * is still unlinked and still carries the account's phone. Returns the linked walk-in id.
+   */
+  async confirmProposedLink(q: TenantQueryable, id: string): Promise<string | null> {
+    const { rows } = await q.query<{ walk_in: string }>(
+      `UPDATE customers a SET linked_walk_in_id = a.proposed_walk_in_id, proposed_walk_in_id = NULL, updated_at = now()
+        WHERE a.id = $1 AND a.proposed_walk_in_id IS NOT NULL AND a.linked_walk_in_id IS NULL
+          AND EXISTS (SELECT 1 FROM customers w WHERE w.id = a.proposed_walk_in_id AND w.phone = a.phone AND w.password_hash IS NULL)
+          AND NOT EXISTS (SELECT 1 FROM customers o WHERE o.linked_walk_in_id = a.proposed_walk_in_id)
+        RETURNING a.linked_walk_in_id AS walk_in`,
+      [id],
+    );
+    if (!rows[0]) await q.query('UPDATE customers SET proposed_walk_in_id = NULL WHERE id = $1', [id]);
+    return rows[0]?.walk_in ?? null;
   },
 
   async setStatus(q: TenantQueryable, id: string, status: CustomerStatus, bumpTokenVersion: boolean): Promise<CustomerPublic | null> {

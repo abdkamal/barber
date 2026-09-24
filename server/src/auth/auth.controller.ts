@@ -3,7 +3,8 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { ZodPipe } from '../common/zod.pipe';
 import { clientIp } from '../security/client-ip';
-import { bodyField, RateLimit } from '../security/rate-limit.guard';
+import { normalizePhone, normalizeSalonCode, normalizeUsername } from '../common/normalize';
+import { RateLimit } from '../security/rate-limit.guard';
 import { CurrentPrincipal, Tenant } from '../tenancy/tenant.decorator';
 import type { TenantContext } from '../tenancy/tenant-context';
 import { Public } from './auth.decorators';
@@ -30,11 +31,22 @@ const ResetBody = z.object({
   newPassword: password,
 });
 
-const acct = (field: string) => (req: Request) => {
-  const code = bodyField(req, 'salonCode');
-  const id = bodyField(req, field);
+/**
+ * Per-account rate-limit key, derived AFTER the same normalisation the service applies (review M1):
+ * «٠٥٠…», «050-…» and «050 …» are one phone, « RAHA-27 » and «raha-27» one salon, so an attacker
+ * cannot multiply his budget by spelling the same account differently.
+ */
+const acct = (field: 'phone' | 'username' | 'identifier') => (req: Request) => {
+  const code = normalizeSalonCode(rawField(req, 'salonCode'));
+  const raw = rawField(req, field);
+  const id = field === 'phone' ? normalizePhone(raw) : field === 'username' ? normalizeUsername(raw) : normalizePhone(raw) ?? normalizeUsername(raw);
   return code && id ? `${code}|${id}` : undefined;
 };
+
+function rawField(req: Request, field: string): string {
+  const v = (req.body as Record<string, unknown> | undefined)?.[field];
+  return typeof v === 'string' ? v.slice(0, 64) : '';
+}
 
 @Controller('auth')
 export class AuthController {

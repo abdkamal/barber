@@ -1,18 +1,22 @@
+import { isIP } from 'node:net';
 import { z } from 'zod';
 
 /**
  * All runtime configuration comes from environment variables (see .env.example).
- * Secrets have no defaults outside development/test.
+ * Review M3: NODE_ENV must be set explicitly, and real secrets are required whenever it is not
+ * `test` — a forgotten variable never silently runs a server with well-known dev secrets.
  */
 const bool = z
   .union([z.boolean(), z.string()])
   .transform((v) => (typeof v === 'boolean' ? v : ['1', 'true', 'yes', 'on'].includes(v.toLowerCase())));
 const int = (def: number) => z.coerce.number().int().default(def);
 
-const DEV_SECRET = 'dev-only-insecure-secret-change-me-0123456789';
+const TEST_SECRET = 'test-only-insecure-secret-0123456789abcdef';
+/** Placeholders that must never be accepted as real secrets. */
+const WEAK_SECRET_RE = /change[-_ ]?me|dev[-_]only|insecure|example|placeholder|secret-?here/i;
 
 const EnvSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  NODE_ENV: z.enum(['development', 'test', 'production'], { message: 'NODE_ENV must be set explicitly to development, test or production' }),
   HOST: z.string().default('0.0.0.0'),
   PORT: int(3000),
 
@@ -56,8 +60,14 @@ const EnvSchema = z.object({
   BACKOFF_MAX_MS: int(15 * 60_000),
   BACKOFF_IP_FREE_ATTEMPTS: int(20),
   BACKOFF_RESET_AFTER_MS: int(60 * 60_000),
+  // Account-wide (all IPs) slow delay — never a lockout (review M1).
+  BACKOFF_ACCOUNT_FREE_ATTEMPTS: int(10),
+  BACKOFF_ACCOUNT_BASE_MS: int(250),
+  BACKOFF_ACCOUNT_MAX_DELAY_MS: int(3_000),
 
   RATE_LIMITS_ENABLED: bool.default(true),
+  // Review M4: at most this many salons may wait for activation at once (self-registration pauses beyond).
+  MAX_PENDING_SALONS: int(50),
 });
 
 export interface RateLimitRule {
@@ -96,8 +106,12 @@ export interface AppConfig {
     maxMs: number;
     ipFreeAttempts: number;
     resetAfterMs: number;
+    accountFreeAttempts: number;
+    accountBaseMs: number;
+    accountMaxDelayMs: number;
   };
   http: { trustProxy: boolean | number | string; corsOrigins: string[] };
+  provisioning: { maxPendingSalons: number };
   rateLimits: {
     enabled: boolean;
     /** Default per-IP limit applied to every route without a specific rule. */
@@ -109,27 +123,68 @@ export interface AppConfig {
     passwordReset: { ip: RateLimitRule; account: RateLimitRule };
     publicLookup: { ip: RateLimitRule };
     sensitive: { ip: RateLimitRule };
+    /** Device sync pushes per staff account (review M4). */
+    sync: { account: RateLimitRule };
   };
 }
 
-function parseTrustProxy(v: string): boolean | number | string {
-  if (v === 'false' || v === '') return false;
-  if (v === 'true') return true;
-  if (/^\d+$/.test(v)) return Number(v);
-  return v; // e.g. "loopback" or a subnet list understood by Express
+const PROXY_NAMES = new Set(['loopback', 'linklocal', 'uniquelocal']);
+
+function isCidrOrIp(v: string): boolean {
+  const [addr, bits, ...rest] = v.split('/');
+  if (rest.length || !addr) return false;
+  const family = isIP(addr);
+  if (!family) return false;
+  if (bits === undefined) return true;
+  if (!/^\d{1,3}$/.test(bits)) return false;
+  return Number(bits) <= (family === 4 ? 32 : 128);
+}
+
+/**
+ * Review M2: which proxies' X-Forwarded-For is trusted for the client IP (rate limits, backoff).
+ * Allowed: `false`/empty, a hop count (e.g. `1` behind one nginx), or a comma-separated list of
+ * proxy addresses/CIDRs (Express names loopback/linklocal/uniquelocal too). `true` (trust every
+ * hop — any client could spoof its IP) is refused in production.
+ */
+export function parseTrustProxy(v: string, env: AppConfig['env']): boolean | number | string {
+  const s = v.trim();
+  if (s === 'false' || s === '') return false;
+  if (s === 'true') {
+    if (env === 'production') throw new Error('TRUST_PROXY=true is not allowed in production: set the hop count (e.g. 1) or the proxy CIDR list');
+    return true;
+  }
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    if (n < 0 || n > 10) throw new Error('TRUST_PROXY hop count must be between 0 and 10');
+    return n;
+  }
+  const parts = s.split(',').map((p) => p.trim()).filter(Boolean);
+  if (!parts.length || !parts.every((p) => PROXY_NAMES.has(p) || isCidrOrIp(p))) {
+    throw new Error('TRUST_PROXY must be false, a hop count, or a comma-separated list of proxy IPs/CIDRs');
+  }
+  return parts.join(',');
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const e = EnvSchema.parse(env);
-  const isProd = e.NODE_ENV === 'production';
+  if (!env.NODE_ENV) throw new Error('NODE_ENV must be set explicitly (development, test or production)');
+  const parsed = EnvSchema.safeParse(env);
+  if (!parsed.success) throw new Error(`invalid configuration: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
+  const e = parsed.data;
+  const isTest = e.NODE_ENV === 'test';
   const secret = (v: string | undefined, name: string): string => {
-    if (v) return v;
-    if (isProd) throw new Error(`${name} must be set in production`);
-    return `${DEV_SECRET}-${name}`;
+    if (v) {
+      if (!isTest && WEAK_SECRET_RE.test(v)) throw new Error(`${name} looks like a placeholder — generate a real secret`);
+      return v;
+    }
+    if (!isTest) throw new Error(`${name} must be set (>= 32 chars) unless NODE_ENV=test`);
+    return `${TEST_SECRET}-${name}`;
   };
   const accessSecret = secret(e.JWT_ACCESS_SECRET, 'JWT_ACCESS_SECRET');
   const refreshSecret = secret(e.JWT_REFRESH_SECRET, 'JWT_REFRESH_SECRET');
-  if (accessSecret === refreshSecret) throw new Error('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ');
+  const pepper = secret(e.RESET_CODE_PEPPER, 'RESET_CODE_PEPPER');
+  if (new Set([accessSecret, refreshSecret, pepper]).size !== 3) {
+    throw new Error('JWT_ACCESS_SECRET, JWT_REFRESH_SECRET and RESET_CODE_PEPPER must all differ');
+  }
   const min = 60_000;
   const hour = 60 * min;
   return {
@@ -159,7 +214,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       issuer: e.JWT_ISSUER,
       accessTtlSec: e.ACCESS_TOKEN_TTL_SEC,
       refreshTtlDays: e.REFRESH_TOKEN_TTL_DAYS,
-      resetCodePepper: secret(e.RESET_CODE_PEPPER, 'RESET_CODE_PEPPER'),
+      resetCodePepper: pepper,
       resetCodeTtlHours: e.RESET_CODE_TTL_HOURS,
       argon2: { memoryCost: e.ARGON2_MEMORY_KIB, timeCost: e.ARGON2_TIME_COST, parallelism: e.ARGON2_PARALLELISM },
     },
@@ -169,11 +224,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       maxMs: e.BACKOFF_MAX_MS,
       ipFreeAttempts: e.BACKOFF_IP_FREE_ATTEMPTS,
       resetAfterMs: e.BACKOFF_RESET_AFTER_MS,
+      accountFreeAttempts: e.BACKOFF_ACCOUNT_FREE_ATTEMPTS,
+      accountBaseMs: e.BACKOFF_ACCOUNT_BASE_MS,
+      accountMaxDelayMs: Math.min(e.BACKOFF_ACCOUNT_MAX_DELAY_MS, 10_000),
     },
     http: {
-      trustProxy: parseTrustProxy(e.TRUST_PROXY),
+      trustProxy: parseTrustProxy(e.TRUST_PROXY, e.NODE_ENV),
       corsOrigins: e.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean),
     },
+    provisioning: { maxPendingSalons: e.MAX_PENDING_SALONS },
     rateLimits: {
       enabled: e.RATE_LIMITS_ENABLED,
       global: { limit: 300, windowMs: min },
@@ -184,6 +243,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       passwordReset: { ip: { limit: 10, windowMs: 15 * min }, account: { limit: 5, windowMs: 15 * min } },
       publicLookup: { ip: { limit: 60, windowMs: min } },
       sensitive: { ip: { limit: 60, windowMs: 15 * min } },
+      sync: { account: { limit: 60, windowMs: min } },
     },
   };
 }

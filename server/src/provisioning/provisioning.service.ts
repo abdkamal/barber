@@ -1,6 +1,6 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { APP_CONFIG, AppConfig } from '../config/config';
-import { Errors } from '../common/errors';
+import { ApiError, Errors } from '../common/errors';
 import { normalizeUsername, USERNAME_RE } from '../common/normalize';
 import { migrateSalon } from '../db/migrate-all';
 import { PoolManager } from '../db/pools';
@@ -56,6 +56,10 @@ export class ProvisioningService {
     if (!isValidTimezone(input.salon.timezone)) throw Errors.validation([{ path: 'salon.timezone', code: 'invalid_timezone' }]);
     const currency = input.salon.currency.toUpperCase();
     if (!isValidCurrency(currency)) throw Errors.validation([{ path: 'salon.currency', code: 'invalid_currency' }]);
+    // Review M4: a global cap on salons waiting for activation — self-registration pauses beyond it.
+    if ((await DirectoryRepo.countPending(this.pools.directoryPool())) >= this.config.provisioning.maxPendingSalons) {
+      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'REGISTRATION_PAUSED', 'تسجيل الصالونات الجديدة متوقف مؤقتًا، حاول لاحقًا');
+    }
     const passwordHash = await this.hasher.hash(input.owner.password);
     const name = input.salon.name.trim();
 
@@ -104,7 +108,7 @@ export class ProvisioningService {
           input.salon.address ?? null,
           input.salon.about ?? null,
         ]);
-        const owner = await StaffRepo.insert(q, { name: input.owner.name.trim(), username, passwordHash, role: 'manager' });
+        const owner = await StaffRepo.insert(q, { name: input.owner.name.trim(), username, passwordHash, role: 'manager', isOwner: true });
         await writeAudit(q, {
           actorKind: 'staff',
           actorId: owner.id,

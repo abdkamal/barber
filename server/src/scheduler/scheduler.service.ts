@@ -18,15 +18,18 @@ import {
   HEARTBEAT_TIMEOUT_MS,
   insertBookingEvent,
   loadDay,
+  operationalShift,
   project,
   releaseExpiredOffers,
   stateWire,
+  updateReference,
   workingStaff,
 } from '../scheduling/day';
+import { closeStaleDays, closeStaleOpenBreaks } from '../scheduling/day-close';
 import { PostCommit } from '../scheduling/post-commit';
 import { reasonText, type ReasonCode } from '../scheduling/reasons';
 import type { StaffInfo } from '../scheduling/rows';
-import { currentShift, type Shift } from '../scheduling/time';
+import type { Shift } from '../scheduling/time';
 
 const TICK_MS = 1_000;
 /** Longest pause for a salon with a working barber (ETA drift, ق5, is checked at least this often). */
@@ -137,8 +140,13 @@ export class SchedulerService implements OnApplicationBootstrap, OnApplicationSh
     const now = this.clock.now();
     const settings = await SettingsRepo.get(t.db);
     let next = now + QUIET_MS;
+    const lookahead = settings.booking_opens_before_minutes * MINUTE;
+    // C1: days that are over (the next business day began) are closed out first.
+    await closeStaleDays(t, this.post, this.notifications, now, lookahead);
     for (const s of await workingStaff(t.db)) {
-      const shift = currentShift(s.schedules, t.salon.timezone, now, settings.booking_opens_before_minutes * MINUTE);
+      // C1: the operational day — the running shift, or an ended one still serving (ق24) customers.
+      const shift = await operationalShift(t.db, t.salon.timezone, s.id, now, lookahead, s.schedules);
+      await this.post.tx(t, (q, effects) => closeStaleOpenBreaks(q, t.salon.timezone, s.id, now, effects));
       if (!shift) continue;
       next = Math.min(next, await this.post.tx(t, (q, effects) => this.runBarber(q, effects, t, s, shift, settings, now)));
     }
@@ -266,7 +274,7 @@ export class SchedulerService implements OnApplicationBootstrap, OnApplicationSh
         text: Texts.etaChanged(s.start, delta, text, ctx.salon.timezone),
         data: { eta: new Date(s.start).toISOString() },
       });
-      await q.query('UPDATE bookings SET last_shown_expected_start = $2 WHERE id = $1', [r.id, new Date(s.start)]);
+      await updateReference(q, r.id, s.start);
       await insertBookingEvent(q, {
         bookingId: r.id,
         type: 'eta_notified',

@@ -32,6 +32,8 @@ export interface BookingRow {
   serve_late: boolean;
   replaces_booking_id: string | null;
   needs_review: boolean;
+  reference_before_advance: Date | null;
+  day_closed_at: Date | null;
   created_at: Date;
   updated_at: Date;
   customer_name: string;
@@ -44,7 +46,8 @@ export const BOOKING_SELECT = `
          b.original_expected_start, b.last_shown_expected_start, b.postpone_used, b.actual_start, b.actual_end,
          b.source, b.work_date::text AS work_date, b.offer_expires_at, b.estimated_duration_seconds, b.service_set_key,
          b.projected_start, b.projected_end, b.last_change_reason, b.last_change_at, b.called_at, b.cancelled_at,
-         b.cancel_reason, b.overrun_alerted_at, b.serve_late, b.replaces_booking_id, b.needs_review, b.created_at,
+         b.cancel_reason, b.overrun_alerted_at, b.serve_late, b.replaces_booking_id, b.needs_review, b.reference_before_advance,
+         b.day_closed_at, b.created_at,
          b.updated_at, c.name AS customer_name, c.phone AS customer_phone, (c.password_hash IS NULL) AS customer_is_walk_in
     FROM bookings b JOIN customers c ON c.id = b.customer_id`;
 

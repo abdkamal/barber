@@ -84,15 +84,21 @@ describe('authentication & sessions', () => {
   });
 
   describe('customers', () => {
-    it('register → active by default; min password length 8; duplicate phone rejected', async () => {
+    it('register → active by default; min password length 8; an existing phone is never revealed (L4)', async () => {
       const phone = randomPhone();
       expect((await registerCustomer(ctx, S.code, phone, '1234567')).body.error.code).toBe('WEAK_PASSWORD');
       const r = await registerCustomer(ctx, S.code, phone);
       expect(r.status).toBe(201);
       expect(r.body).toMatchObject({ role: 'customer', account: { status: 'active' } });
-      const dup = await registerCustomer(ctx, S.code, phone.replace(/^05/, '05 '));
+      // Review L4: same number, other password → the generic REGISTRATION_FAILED (no "phone taken")…
+      const dup = await registerCustomer(ctx, S.code, phone.replace(/^05/, '05 '), 'another-pass-1');
       expect(dup.status).toBe(409);
-      expect(dup.body.error.code).toBe('PHONE_ALREADY_REGISTERED');
+      expect(dup.body.error.code).toBe('REGISTRATION_FAILED');
+      expect(JSON.stringify(dup.body)).not.toMatch(/PHONE|مسجل/);
+      // …and with the account's own password it simply signs in to that account.
+      const again = await registerCustomer(ctx, S.code, phone.replace(/^05/, '05 '));
+      expect(again.status).toBe(201);
+      expect(again.body.account.id).toBe(r.body.account.id);
       const login = await ctx.http().post('/v1/auth/customer/login').send({ salonCode: S.code, phone: '٠' + phone.slice(1), password: CUSTOMER_PW });
       expect(login.status).toBe(200);
     });

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { SyncService } from '../src/sync/sync.service';
 import { TenantResolver } from '../src/tenancy/tenant-resolver.service';
+import { StaffStream } from '../src/sync/staff-stream';
 import { salonQuery, startApp, TestContext } from './helpers';
 import {
   at,
@@ -290,17 +291,19 @@ describe('staff sync', () => {
       new Promise<number>((res) => {
         const ws = new WebSocket(u, { headers });
         ws.on('unexpected-response', (_req, r) => res(r.statusCode ?? 0));
-        ws.on('open', () => res(101));
+        ws.on('open', () => {
+          res(101);
+          ws.close();
+        });
         ws.on('error', () => undefined);
       });
-    expect(await failStatus({})).toBe(401);
     expect(await failStatus({ Authorization: 'Bearer nope' })).toBe(401);
     const c = await newCustomer(ctx, s);
     expect(await failStatus({ Authorization: `Bearer ${c.token}` })).toBe(403);
 
     const open = (token: string) =>
       new Promise<{ ws: InstanceType<typeof WebSocket>; msgs: Array<{ type: string; seq: number }> }>((res, rej) => {
-        const ws = new WebSocket(`${url}?access_token=${token}`);
+        const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
         const msgs: Array<{ type: string; seq: number }> = [];
         ws.on('message', (d) => msgs.push(JSON.parse(String(d))));
         ws.on('open', () => res({ ws, msgs }));
@@ -320,5 +323,59 @@ describe('staff sync', () => {
     s1.ws.close();
     s2.ws.close();
     await new Promise((r) => setTimeout(r, 50));
+  });
+
+  it('L6: WS never takes the token from the URL; sub-protocol or first-message auth; ≤ 3 sockets per account; batched revalidation', async () => {
+    const s = await setupQueueSalon(ctx);
+    const b = s.barbers[0]!;
+    const server = ctx.app.getHttpServer();
+    if (!server.listening) await new Promise<void>((res) => server.listen(0, '127.0.0.1', () => res()));
+    const port = (server.address() as AddressInfo).port;
+    const url = `ws://127.0.0.1:${port}/v1/staff/stream`;
+    const { WebSocket } = await import('ws');
+    type Sock = { ws: InstanceType<typeof WebSocket>; msgs: Array<{ type: string }>; closed: Promise<number>; protocol: string };
+    const connect = (u: string, protocols?: string[]) =>
+      new Promise<Sock>((res, rej) => {
+        const ws = new WebSocket(u, protocols);
+        const msgs: Array<{ type: string }> = [];
+        const closed = new Promise<number>((r) => ws.on('close', (code) => r(code)));
+        ws.on('message', (d) => msgs.push(JSON.parse(String(d))));
+        ws.on('open', () => res({ ws, msgs, closed, protocol: ws.protocol }));
+        ws.on('error', rej);
+      });
+    const waitFor = async (cond: () => boolean) => {
+      for (let i = 0; i < 100 && !cond(); i++) await new Promise((r) => setTimeout(r, 20));
+      return cond();
+    };
+
+    // A token in the query string is ignored: no hello; a wrong first message closes with 4401.
+    const q = await connect(`${url}?access_token=${b.token}`);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(q.msgs).toHaveLength(0);
+    q.ws.send('hello?');
+    expect(await q.closed).toBe(4401);
+
+    // Sub-protocol: the server selects saloni.v1 and never echoes the bearer entry.
+    const p = await connect(url, ['saloni.v1', `bearer.${b.token}`]);
+    expect(p.protocol).toBe('saloni.v1');
+    expect(await waitFor(() => p.msgs.some((m) => m.type === 'hello'))).toBe(true);
+
+    // First-message auth.
+    const f = await connect(url);
+    f.ws.send(JSON.stringify({ type: 'auth', token: b.token }));
+    expect(await waitFor(() => f.msgs.some((m) => m.type === 'hello'))).toBe(true);
+
+    // Per-account cap (3): a 4th socket closes the oldest one (4408).
+    const g = await connect(url, ['saloni.v1', `bearer.${b.token}`]);
+    const h = await connect(url, ['saloni.v1', `bearer.${b.token}`]);
+    expect(await p.closed).toBe(4408);
+    const stream = ctx.app.get(StaffStream);
+
+    // Revalidation (one query per salon): a revoked session closes its sockets.
+    await salonQuery(ctx, s.dbName, "UPDATE sessions SET revoked_at = now() WHERE subject_kind = 'staff' AND subject_id = $1", [b.id]);
+    await stream.housekeeping();
+    expect(await f.closed).toBe(4401);
+    expect(await g.closed).toBe(4401);
+    expect(await h.closed).toBe(4401);
   });
 });

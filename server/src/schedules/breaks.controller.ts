@@ -11,6 +11,7 @@ import { StaffRepo } from '../staff/staff.repository';
 import type { TenantQueryable, TenantContext } from '../tenancy/tenant-context';
 import { CurrentPrincipal, Tenant } from '../tenancy/tenant.decorator';
 import { datedBreaksOverlap, recurringBreaksOverlap } from './break-overlap';
+import { ScheduleChangesService } from './schedule-changes.service';
 import { BreakRow, BreaksRepo } from './schedules.repository';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -68,49 +69,74 @@ async function assertNoOverlap(q: TenantQueryable, staffId: string, body: z.infe
   }
 }
 
-/** Recurring/dated breaks — rest, prayer, emergency, or "walk-in only" (ق33) — per barber or all. */
+/**
+ * Recurring/dated breaks — rest, prayer, emergency, or "walk-in only" (ق33) — per barber or all.
+ * Review I6: every affected barber's current day is locked first; the queues are then re-projected
+ * and committed with a reason, devices get `breaks_changed`, and the scheduler is poked.
+ */
 @Controller('manager/breaks')
 @Roles('manager')
 export class BreaksController {
+  constructor(private readonly changes: ScheduleChangesService) {}
+
   @Get()
   async list(@Tenant() t: TenantContext) {
     return (await BreaksRepo.list(t.db)).map(toDto);
   }
 
+  /** Days a break of these staff affects: the current day of each (recurring), or the dated day. */
+  private affected(q: TenantQueryable, t: TenantContext, staffIds: string[], workDate: string | null) {
+    return workDate === null
+      ? this.changes.currentDays(q, t, staffIds)
+      : Promise.all(staffIds.map((id) => this.changes.dayOf(q, t, id, workDate))).then((d) => d.flat());
+  }
+
   @Post()
   async create(@Tenant() t: TenantContext, @CurrentPrincipal() me: Principal, @Body(new ZodPipe(CreateBreak)) body: z.infer<typeof CreateBreak>, @Req() req: Request) {
-    return t.db.tx(async (q) => {
-      const staffIds: string[] =
-        body.staffId === 'all' ? (await StaffRepo.list(q)).filter((s) => s.active).map((s) => s.id) : [body.staffId];
-      if (staffIds.length === 0) throw Errors.validation([{ path: 'staffId', code: 'not_found' }]);
-      if (body.staffId !== 'all') {
-        const staff = await StaffRepo.findById(q, body.staffId);
-        if (!staff) throw Errors.validation([{ path: 'staffId', code: 'not_found' }]);
-      }
-      const created: BreakRow[] = [];
-      for (const staffId of staffIds) {
-        await assertNoOverlap(q, staffId, body);
-        const row = body.startTime
-          ? await BreaksRepo.insertRecurring(q, staffId, body.type, `${body.startTime}:00`, `${body.endTime}:00`, me.subjectId)
-          : await BreaksRepo.insertDated(q, staffId, body.workDate!, body.type, body.startsAt!, body.endsAt!, me.subjectId);
-        created.push(row);
-      }
-      await writeAudit(q, {
-        actorKind: 'staff', actorId: me.subjectId, action: 'break.created', targetKind: 'break', ip: clientIp(req),
-        details: { staffId: body.staffId, type: body.type, count: created.length },
-      });
-      return created.map(toDto);
-    });
+    const staffIds: string[] =
+      body.staffId === 'all' ? (await StaffRepo.list(t.db)).filter((s) => s.active).map((s) => s.id) : [body.staffId];
+    if (staffIds.length === 0) throw Errors.validation([{ path: 'staffId', code: 'not_found' }]);
+    if (body.staffId !== 'all') {
+      const staff = await StaffRepo.findById(t.db, body.staffId);
+      if (!staff) throw Errors.validation([{ path: 'staffId', code: 'not_found' }]);
+    }
+    return this.changes.run(
+      t,
+      (q) => this.affected(q, t, staffIds, body.startTime ? null : body.workDate!),
+      async (q) => {
+        const created: BreakRow[] = [];
+        for (const staffId of staffIds) {
+          await assertNoOverlap(q, staffId, body);
+          const row = body.startTime
+            ? await BreaksRepo.insertRecurring(q, staffId, body.type, `${body.startTime}:00`, `${body.endTime}:00`, me.subjectId)
+            : await BreaksRepo.insertDated(q, staffId, body.workDate!, body.type, body.startsAt!, body.endsAt!, me.subjectId);
+          created.push(row);
+        }
+        await writeAudit(q, {
+          actorKind: 'staff', actorId: me.subjectId, action: 'break.created', targetKind: 'break', ip: clientIp(req),
+          details: { staffId: body.staffId, type: body.type, count: created.length },
+        });
+        return created.map(toDto);
+      },
+      { reason: 'schedule_changed', actorId: me.subjectId, afterDay: (q, effects, ctx) => this.changes.breaksChanged(q, effects, ctx) },
+    );
   }
 
   @Delete(':id')
   @HttpCode(200)
   async remove(@Tenant() t: TenantContext, @CurrentPrincipal() me: Principal, @Param('id', new ParseUUIDPipe({ version: '4', exceptionFactory: () => Errors.notFound() })) id: string, @Req() req: Request) {
-    return t.db.tx(async (q) => {
-      const ok = await BreaksRepo.delete(q, id);
-      if (!ok) throw Errors.notFound();
-      await writeAudit(q, { actorKind: 'staff', actorId: me.subjectId, action: 'break.removed', targetKind: 'break', targetId: id, ip: clientIp(req) });
-      return { ok: true };
-    });
+    const existing = await BreaksRepo.findById(t.db, id);
+    if (!existing) throw Errors.notFound();
+    return this.changes.run(
+      t,
+      (q) => this.affected(q, t, [existing.staff_id], existing.work_date),
+      async (q) => {
+        const ok = await BreaksRepo.delete(q, id);
+        if (!ok) throw Errors.notFound();
+        await writeAudit(q, { actorKind: 'staff', actorId: me.subjectId, action: 'break.removed', targetKind: 'break', targetId: id, ip: clientIp(req) });
+        return { ok: true };
+      },
+      { reason: 'schedule_changed', actorId: me.subjectId, afterDay: (q, effects, ctx) => this.changes.breaksChanged(q, effects, ctx) },
+    );
   }
 }

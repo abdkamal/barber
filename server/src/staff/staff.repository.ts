@@ -7,6 +7,7 @@ export interface StaffRow {
   password_hash: string;
   role: 'barber' | 'manager';
   active: boolean;
+  is_owner: boolean;
   call_ahead_minutes: number;
   token_version: number;
   created_at: Date;
@@ -15,7 +16,7 @@ export interface StaffRow {
 
 export type StaffPublic = Omit<StaffRow, 'password_hash' | 'token_version'>;
 
-const PUBLIC_COLS = 'id, name, username, role, active, call_ahead_minutes, created_at, last_login_at';
+const PUBLIC_COLS = 'id, name, username, role, active, is_owner, call_ahead_minutes, created_at, last_login_at';
 
 export function toStaffPublic(r: StaffRow | StaffPublic): StaffPublic {
   return {
@@ -24,6 +25,7 @@ export function toStaffPublic(r: StaffRow | StaffPublic): StaffPublic {
     username: r.username,
     role: r.role,
     active: r.active,
+    is_owner: r.is_owner,
     call_ahead_minutes: r.call_ahead_minutes,
     created_at: r.created_at,
     last_login_at: r.last_login_at,
@@ -49,11 +51,11 @@ export const StaffRepo = {
 
   async insert(
     q: TenantQueryable,
-    s: { name: string; username: string; passwordHash: string; role: 'barber' | 'manager' },
+    s: { name: string; username: string; passwordHash: string; role: 'barber' | 'manager'; isOwner?: boolean },
   ): Promise<StaffPublic> {
     const { rows } = await q.query<StaffPublic>(
-      `INSERT INTO staff (name, username, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING ${PUBLIC_COLS}`,
-      [s.name, s.username, s.passwordHash, s.role],
+      `INSERT INTO staff (name, username, password_hash, role, is_owner) VALUES ($1, $2, $3, $4, $5) RETURNING ${PUBLIC_COLS}`,
+      [s.name, s.username, s.passwordHash, s.role, !!s.isOwner],
     );
     return rows[0]!;
   },
@@ -97,8 +99,9 @@ export const StaffRepo = {
     );
   },
 
+  /** Counts active managers, locking their rows (serialises concurrent demotions — review L5). */
   async countActiveManagers(q: TenantQueryable): Promise<number> {
-    const { rows } = await q.query<{ n: string }>("SELECT count(*) AS n FROM staff WHERE role = 'manager' AND active");
-    return Number(rows[0]!.n);
+    const { rows } = await q.query<{ id: string }>("SELECT id FROM staff WHERE role = 'manager' AND active FOR UPDATE");
+    return rows.length;
   },
 };

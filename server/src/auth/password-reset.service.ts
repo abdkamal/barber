@@ -65,10 +65,12 @@ export class PasswordResetService {
     if (!found || found.record.status === 'suspended') throw Errors.invalidResetCode();
     const t = found.tenant;
     const identifier = dto.identifier.trim();
-    const throttleKey = identifier.toLowerCase();
+    // Review M1: one throttle key per account, however the phone/username was typed.
+    const throttleKey = normalizePhone(identifier) ?? normalizeUsername(identifier);
 
     const wait = await this.throttle.retryAfterSec(t, 'password_reset', throttleKey, ip);
     if (wait > 0) throw Errors.loginBackoff(wait);
+    await this.throttle.slowDown(t, 'password_reset', throttleKey);
 
     // The identifier is a staff username or a customer phone number.
     const candidates: Array<{ kind: SubjectKind; id: string }> = [];

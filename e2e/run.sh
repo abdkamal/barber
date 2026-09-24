@@ -38,6 +38,9 @@ for db in $DBS; do
 done
 
 export NODE_ENV=development
+# The server refuses to start without real secrets unless NODE_ENV=test (review M3): fresh ones per run.
+gen_secret() { node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"; }
+export JWT_ACCESS_SECRET="$(gen_secret)" JWT_REFRESH_SECRET="$(gen_secret)" RESET_CODE_PEPPER="$(gen_secret)"
 export PORT HOST=127.0.0.1
 export DIRECTORY_DB_NAME=saloni_e2e_directory
 export SALON_DB_PREFIX=saloni_e2e_salon_

@@ -59,18 +59,18 @@ export interface BreakRow {
 
 export const BreaksRepo = {
   async listForStaff(q: TenantQueryable, staffId: string): Promise<BreakRow[]> {
-    const { rows } = await q.query<BreakRow>('SELECT * FROM breaks WHERE staff_id = $1 ORDER BY work_date NULLS FIRST, start_time, starts_at', [staffId]);
+    const { rows } = await q.query<BreakRow>('SELECT *, work_date::text AS work_date FROM breaks WHERE staff_id = $1 ORDER BY breaks.work_date NULLS FIRST, start_time, starts_at', [staffId]);
     return rows;
   },
 
   async list(q: TenantQueryable): Promise<BreakRow[]> {
-    const { rows } = await q.query<BreakRow>('SELECT * FROM breaks ORDER BY staff_id, work_date NULLS FIRST, start_time, starts_at');
+    const { rows } = await q.query<BreakRow>('SELECT *, work_date::text AS work_date FROM breaks ORDER BY staff_id, breaks.work_date NULLS FIRST, start_time, starts_at');
     return rows;
   },
 
   async insertRecurring(q: TenantQueryable, staffId: string, type: BreakRow['type'], startTime: string, endTime: string, createdBy: string): Promise<BreakRow> {
     const { rows } = await q.query<BreakRow>(
-      `INSERT INTO breaks (staff_id, type, start_time, end_time, created_by_staff_id) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      `INSERT INTO breaks (staff_id, type, start_time, end_time, created_by_staff_id) VALUES ($1, $2, $3, $4, $5) RETURNING *, work_date::text AS work_date`,
       [staffId, type, startTime, endTime, createdBy],
     );
     return rows[0]!;
@@ -78,14 +78,14 @@ export const BreaksRepo = {
 
   async insertDated(q: TenantQueryable, staffId: string, workDate: string, type: BreakRow['type'], startsAt: string, endsAt: string, createdBy: string): Promise<BreakRow> {
     const { rows } = await q.query<BreakRow>(
-      `INSERT INTO breaks (staff_id, work_date, type, starts_at, ends_at, created_by_staff_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      `INSERT INTO breaks (staff_id, work_date, type, starts_at, ends_at, created_by_staff_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *, work_date::text AS work_date`,
       [staffId, workDate, type, startsAt, endsAt, createdBy],
     );
     return rows[0]!;
   },
 
   async findById(q: TenantQueryable, id: string): Promise<BreakRow | null> {
-    const { rows } = await q.query<BreakRow>('SELECT * FROM breaks WHERE id = $1', [id]);
+    const { rows } = await q.query<BreakRow>('SELECT *, work_date::text AS work_date FROM breaks WHERE id = $1', [id]);
     return rows[0] ?? null;
   },
 
@@ -106,7 +106,7 @@ export interface AbsenceRow {
 
 export const AbsencesRepo = {
   async list(q: TenantQueryable): Promise<AbsenceRow[]> {
-    const { rows } = await q.query<AbsenceRow>('SELECT * FROM absences ORDER BY work_date DESC');
+    const { rows } = await q.query<AbsenceRow>('SELECT *, work_date::text AS work_date FROM absences ORDER BY absences.work_date DESC');
     return rows;
   },
 
@@ -114,7 +114,7 @@ export const AbsencesRepo = {
     const { rows } = await q.query<AbsenceRow>(
       `INSERT INTO absences (staff_id, work_date, reason, recorded_by_staff_id) VALUES ($1, $2, $3, $4)
        ON CONFLICT (staff_id, work_date) DO UPDATE SET reason = EXCLUDED.reason, recorded_by_staff_id = EXCLUDED.recorded_by_staff_id
-       RETURNING *`,
+       RETURNING *, work_date::text AS work_date`,
       [staffId, workDate, reason, recordedBy],
     );
     return rows[0]!;

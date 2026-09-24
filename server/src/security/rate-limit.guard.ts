@@ -7,7 +7,7 @@ import { clientIp } from './client-ip';
 import { RateLimiter } from './rate-limiter';
 
 type Rules = { ip: RateLimitRule; account?: RateLimitRule };
-export type RateLimitName = Exclude<keyof AppConfig['rateLimits'], 'enabled' | 'global'>;
+export type RateLimitName = Exclude<keyof AppConfig['rateLimits'], 'enabled' | 'global' | 'sync'>;
 
 export interface RateLimitSpec {
   name: RateLimitName;
@@ -17,12 +17,6 @@ export interface RateLimitSpec {
 
 const RATE_LIMIT_KEY = 'saloni:rate-limit';
 export const RateLimit = (spec: RateLimitSpec) => SetMetadata(RATE_LIMIT_KEY, spec);
-
-/** Reads a string field of the raw body defensively (guards run before validation pipes). */
-export function bodyField(req: Request, field: string): string {
-  const v = (req.body as Record<string, unknown> | undefined)?.[field];
-  return typeof v === 'string' ? v.trim().toLowerCase().slice(0, 64) : '';
-}
 
 /** Per-IP (always) and per-account (where declared) request limits. Responds 429 + Retry-After. */
 @Injectable()

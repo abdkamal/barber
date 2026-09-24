@@ -5,11 +5,11 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { Roles } from '../auth/auth.decorators';
 import type { Principal } from '../auth/principal';
-import { Errors } from '../common/errors';
+import { Errors, MAX_PRICE_MINOR, MAX_SERVICE_MINUTES } from '../common/errors';
 import { ZodPipe } from '../common/zod.pipe';
 import { writeAudit } from '../security/audit';
 import { clientIp } from '../security/client-ip';
-import { ImageStorageService, MAX_UPLOAD_BYTES, splitStoredPath } from '../storage/image-storage.service';
+import { assertUploadsAllowed, ImageStorageService, MAX_UPLOAD_BYTES, splitStoredPath } from '../storage/image-storage.service';
 import type { TenantContext } from '../tenancy/tenant-context';
 import { CurrentPrincipal, Tenant } from '../tenancy/tenant.decorator';
 import { CatalogItemRow, CatalogRepo } from './catalog.repository';
@@ -21,12 +21,12 @@ const CreateCatalogItem = z
     name: z.string().trim().min(1).max(80),
     description: z.string().trim().max(2000).nullable().optional(),
     features: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
-    price: z.number().int().min(0).nullable().optional(),
-    position: z.number().int().min(0).optional(),
+    price: z.number().int().min(0).max(MAX_PRICE_MINOR).nullable().optional(),
+    position: z.number().int().min(0).max(10_000).optional(),
     visible: z.boolean().optional(),
     // kind = 'service' only: either link an existing bookable service, or create one inline.
     serviceId: z.string().uuid().optional(),
-    durationMinutes: z.number().int().min(1).max(600).optional(),
+    durationMinutes: z.number().int().min(1).max(MAX_SERVICE_MINUTES).optional(),
   })
   .strict()
   .refine((b) => b.kind !== 'service' || b.serviceId || b.durationMinutes, {
@@ -39,8 +39,8 @@ const UpdateCatalogItem = z
     name: z.string().trim().min(1).max(80).optional(),
     description: z.string().trim().max(2000).nullable().optional(),
     features: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
-    price: z.number().int().min(0).nullable().optional(),
-    position: z.number().int().min(0).optional(),
+    price: z.number().int().min(0).max(MAX_PRICE_MINOR).nullable().optional(),
+    position: z.number().int().min(0).max(10_000).optional(),
     visible: z.boolean().optional(),
   })
   .strict();
@@ -155,6 +155,7 @@ export class CatalogController {
     @UploadedFile() file: Express.Multer.File | undefined,
     @Req() req: Request,
   ) {
+    assertUploadsAllowed(t.salon);
     if (!file?.buffer?.length) throw Errors.validation([{ path: 'file', code: 'required' }]);
     const before = await CatalogRepo.findById(t.db, id);
     if (!before) throw Errors.notFound();

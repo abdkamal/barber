@@ -4,6 +4,7 @@ import { LoginThrottle } from '../auth/login-throttle';
 import type { AppConfig } from '../config/config';
 import { normalizeSalonCode, normalizeUsername } from '../common/normalize';
 import { PoolManager } from '../db/pools';
+import { quoteIdent } from '../db/sql';
 import { DirectoryRepo, SalonRecord, SalonStatus } from '../directory/directory.repository';
 import { writeAudit } from '../security/audit';
 import { StaffRepo } from '../staff/staff.repository';
@@ -44,6 +45,26 @@ export class VendorService {
     const t = this.resolver.contextFor(updated);
     if (t) await writeAudit(t, { actorKind: 'vendor', action, targetKind: 'salon', targetId: rec.id, details: { from: rec.status, to: status } });
     return updated;
+  }
+
+  /**
+   * Review M4: removes salons that self-registered but were never activated within `olderThanDays`
+   * (their database and directory row). `dryRun` only lists them.
+   */
+  async cleanupPending(olderThanDays: number, dryRun: boolean, now = Date.now()): Promise<SalonRecord[]> {
+    if (!Number.isFinite(olderThanDays) || olderThanDays < 1) throw new VendorError('--older-than-days must be >= 1');
+    const stale = await DirectoryRepo.stalePending(this.pools.directoryPool(), new Date(now - olderThanDays * 86_400_000));
+    if (dryRun) return stale;
+    for (const rec of stale) {
+      const admin = await this.pools.adminClient();
+      try {
+        await admin.query(`DROP DATABASE IF EXISTS ${quoteIdent(rec.db_name)} WITH (FORCE)`);
+      } finally {
+        await admin.end();
+      }
+      await DirectoryRepo.delete(this.pools.directoryPool(), rec.id);
+    }
+    return stale;
   }
 
   activate(code: string): Promise<SalonRecord> {

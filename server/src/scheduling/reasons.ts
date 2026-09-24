@@ -24,6 +24,9 @@ export const REASONS = {
   walk_in: 'أُضيف زبون حاضر',
   transferred: 'نقل المدير حجزك إلى حلاق آخر',
   transferred_ahead: 'نُقل حجز زبون قبلك إلى حلاق آخر',
+  day_closed: 'انتهى يوم العمل',
+  barber_absent: 'الحلاق لن يعمل اليوم',
+  schedule_changed: 'عدّل المدير استراحات الحلاق',
 } as const;
 
 export type ReasonCode = keyof typeof REASONS;
