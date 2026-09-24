@@ -59,4 +59,62 @@ void main() {
     expect(find.text('صالونك بانتظار التفعيل'), findsOneWidget);
     await teardownApp(tester, h);
   });
+
+  testWidgets('ملاحظات التجربة: الشيكل ₪ بلا علم، بلد الصالون، وساعات العمل تُعرض كما اختيرت', (tester) async {
+    final server = FakeServer();
+    // شاشة طويلة لتظهر قائمتا العملة والبلد كاملتين (اللمس لا يمر عبر الشريط السفلي).
+    final h = await pumpStaffApp(tester, server, signedIn: false, height: 2000);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go('/signup');
+    await settle(tester);
+    await tester.enterText(find.byType(TextField).at(0), 'سالم');
+    await tester.enterText(find.byType(TextField).at(1), 'salem');
+    await tester.enterText(find.byType(TextField).at(2), 'long-enough-pass');
+    await tester.enterText(find.byType(TextField).at(3), 'long-enough-pass');
+    await tester.tap(find.text('التالي'));
+    await tester.pump();
+
+    // الشيكل: رمزه ₪ علامته البصرية، ولا أعلام دول في القائمة.
+    final ils = find.byKey(const Key('currency-ILS'));
+    expect(find.descendant(of: ils, matching: find.text('₪')), findsOneWidget);
+    expect(find.descendant(of: ils, matching: find.text('شيكل')), findsOneWidget);
+    final allText = tester.widgetList<Text>(find.byType(Text)).map((t) => t.data ?? '').join();
+    expect(allText.runes.any((r) => r >= 0x1F1E6 && r <= 0x1F1FF), isFalse, reason: 'لا أعلام');
+    await tester.tap(ils);
+    await tester.pump();
+    expect(
+        tester.widget<Semantics>(find.descendant(of: ils, matching: find.byType(Semantics)).first).properties.selected,
+        isTrue);
+    // ⓘ العملة يفتح الشرح.
+    final currencyHelp = find.bySemanticsLabel('شرح: العملة');
+    await tester.tap(currencyHelp);
+    await settle(tester);
+    expect(find.byKey(const Key('saloni-help-sheet')), findsOneWidget);
+    await tester.tap(find.text('فهمت'));
+    await settle(tester);
+    await tester.enterText(find.byType(TextField).at(0), 'صالون القدس');
+    await tester.tap(find.text('التالي'));
+    await tester.pump();
+
+    // الخطوة 3: الافتتاح الافتراضي 10:00 يُعرض «10:00 ص» (لا تحويل بتوقيت الجهاز).
+    expect(find.text('10:00 ص'), findsWidgets);
+    expect(find.text('11:00 م'), findsWidgets);
+    await tester.tap(find.text('التالي'));
+    await tester.pump();
+    await tester.tap(find.text('إضافة خدمة'));
+    await settle(tester);
+    await tester.enterText(find.byType(TextField).at(0), 'حلاقة');
+    await tester.enterText(find.byType(TextField).at(2), '40');
+    expect(find.textContaining('₪'), findsWidgets);
+    await tester.tap(find.text('إضافة'));
+    await settle(tester);
+    expect(find.textContaining('40'), findsWidgets);
+    await tester.tap(find.text('إرسال للتفعيل'));
+    await settle(tester, 12);
+
+    expect(server.registered?['salon']?['currency'], 'ILS');
+    expect(server.registered?['salon']?['timezone'], 'Asia/Hebron');
+    expect(server.schedulesPut.first['opensAt'], '10:00');
+    expect(server.servicesCreated.single['price'], 4000);
+    await teardownApp(tester, h);
+  });
 }

@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:saloni_api/saloni_api.dart' show serverWeekday;
+import 'package:saloni_api/saloni_api.dart' show salonWallTimeToUtc, serverWeekday;
 import 'package:saloni_ui/saloni_ui.dart';
 
 import '../../core/format.dart';
+import '../../core/help_texts.dart';
 import '../../state/app_services.dart';
 import '../common/shells.dart';
 import '../common/ui.dart';
@@ -81,10 +82,12 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SectionTitle('ساعات العمل'),
+            const SectionTitle('ساعات العمل', trailing: SaloniHelpHint(HelpTexts.salonHours)),
             const SizedBox(height: 6),
             const Muted('إن كان الإغلاق قبل الافتتاح فالدوام يمتد بعد منتصف الليل (ق30).'),
             const SizedBox(height: 12),
+            const SaloniLabelWithHelp(label: 'لمن؟', help: HelpTexts.scheduleWho),
+            const SizedBox(height: 4),
             _WhoPicker(
               data: d,
               value: who,
@@ -144,6 +147,8 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
           children: [
             const SectionTitle('استراحة أو فترة جديدة'),
             const SizedBox(height: 12),
+            const SaloniLabelWithHelp(label: 'النوع', help: HelpTexts.breakType),
+            const SizedBox(height: 4),
             SaloniSegmentedControl(
               label: 'النوع',
               value: type,
@@ -161,6 +166,8 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
             const SizedBox(height: 12),
             _WhoPicker(data: d, value: who, allowAll: true, onChanged: (v) => setState(() => who = v ?? 'all')),
             const SizedBox(height: 12),
+            const SaloniLabelWithHelp(label: 'التكرار', help: HelpTexts.breakRepeat),
+            const SizedBox(height: 4),
             SaloniSegmentedControl(
               label: 'التكرار',
               value: daily ? 'daily' : 'date',
@@ -197,7 +204,10 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
       });
     });
     if (ok != true) return;
-    DateTime at(int m) => DateTime(date.year, date.month, date.day, m ~/ 60, m % 60);
+    // الساعة المختارة ساعة جدارية **بتوقيت الصالون** لا الجهاز (ملاحظة التجربة:
+    // اختلاف التوقيتين كان يزيح الفترة ساعة).
+    DateTime at(int m) => salonWallTimeToUtc(
+        year: date.year, month: date.month, day: date.day, minutesOfDay: m, timezoneName: salonTimezone);
     final end = to > from ? at(to) : at(to).add(const Duration(days: 1));
     await _run(() async {
       await ref.read(servicesProvider).api.createManagerBreak({
@@ -206,8 +216,8 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
         if (daily) ...{'startTime': wireTime(from), 'endTime': wireTime(to)},
         if (!daily) ...{
           'workDate': _date(date),
-          'startsAt': at(from).toUtc().toIso8601String(),
-          'endsAt': end.toUtc().toIso8601String(),
+          'startsAt': at(from).toIso8601String(),
+          'endsAt': end.toIso8601String(),
         },
       });
     }, 'أُضيفت');
@@ -227,7 +237,7 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SectionTitle('إجازة / غياب'),
+            const SectionTitle('إجازة / غياب', trailing: SaloniHelpHint(HelpTexts.absence)),
             const SizedBox(height: 6),
             const Muted('يتوقف الحجز عند الحلاق في ذلك اليوم. الحجوزات القائمة تُنقل يدويًا من «الطوابير» (ق25).'),
             const SizedBox(height: 12),

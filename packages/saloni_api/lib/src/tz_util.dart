@@ -100,3 +100,15 @@ String salonHourMinute(DateTime utc, String timezoneName) {
 /// «ص» أو «م» بتوقيت الصالون.
 String salonAmPm(DateTime utc, String timezoneName) =>
     toSalonTime(utc, timezoneName).hour < 12 ? 'ص' : 'م';
+
+/// يحوّل «تاريخ + ساعة جدارية» بتوقيت الصالون إلى وقت مطلق (UTC) — لا بتوقيت
+/// الجهاز. مثال: استراحة يوم محدد 13:00 في صالون بالرياض تبقى 13:00 بتوقيت
+/// الرياض حتى لو كان هاتف المدير على منطقة زمنية أخرى.
+DateTime salonWallTimeToUtc({
+  required int year,
+  required int month,
+  required int day,
+  required int minutesOfDay,
+  required String timezoneName,
+}) =>
+    tz.TZDateTime(_location(timezoneName), year, month, day, minutesOfDay ~/ 60, minutesOfDay % 60).toUtc();

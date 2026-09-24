@@ -8,7 +8,7 @@ import '../../state/app_services.dart';
 import '../common/first_run.dart';
 import '../common/ui.dart';
 
-/// المزيد (الحلاق): المظهر، الأرقام، الجولة التعريفية، الخروج.
+/// المزيد (الحلاق): المظهر، الجولة التعريفية، الخروج (الأرقام غربية دائمًا — ق41).
 class MoreScreen extends ConsumerWidget {
   const MoreScreen({super.key});
 
@@ -45,8 +45,7 @@ class MoreScreen extends ConsumerWidget {
 
 /// تفضيلات التطبيق والحساب — مشتركة بين «المزيد» وإعدادات المدير.
 class AppPreferencesSection extends ConsumerWidget {
-  const AppPreferencesSection({super.key, this.showDigits = true});
-  final bool showDigits;
+  const AppPreferencesSection({super.key});
 
   Future<void> _logout(BuildContext context, WidgetRef ref) async {
     final repoPending = ref.exists(barberRepoProvider) ? ref.read(barberRepoProvider).pending : 0;
@@ -80,15 +79,6 @@ class AppPreferencesSection extends ConsumerWidget {
               SaloniSegmentedOption(value: 'light', label: 'فاتح'),
             ],
             onChanged: (v) => prefs.setThemeMode(v == 'light' ? ThemeMode.light : ThemeMode.dark),
-          ),
-          if (showDigits) ClipRRect(
-            borderRadius: SaloniRadius.lgAll,
-            child: SettingSwitch(
-              label: 'الأرقام العربية المشرقية',
-              description: 'عرض ٠١٢٣ بدل 0123 على هذا الجهاز',
-              checked: prefs.easternDigits,
-              onChanged: prefs.setEasternDigits,
-            ),
           ),
         ]),
         const SizedBox(height: 20),

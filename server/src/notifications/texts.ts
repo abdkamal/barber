@@ -50,6 +50,10 @@ export const Texts = {
     title: 'حلاق غائب اليوم',
     body: `أبلغ الحلاق ${barber} أنه لن يعمل اليوم — ${nf.format(open)} حجز قائم يحتاج نقلًا يدويًا من شاشة الطوابير`,
   }),
+  barberAbsenceCancelled: (barber: string): Text => ({
+    title: 'عاد حلاق للعمل اليوم',
+    body: `تراجع الحلاق ${barber} عن «لن أعمل اليوم» — عاد الحجز عنده، وما نقلته من حجوزاته يبقى كما هو`,
+  }),
   syncConflict: (barber: string, customer: string, what: string): Text => ({
     title: 'تعارض مزامنة',
     body: `تعارض مزامنة لدى ${barber} في حجز ${customer}: ${what} — راجعه من شاشة المعلّقات`,

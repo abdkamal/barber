@@ -161,7 +161,10 @@ enum DeviceEventType {
   closingDecision,
   breakStarted,
   breakEnded,
-  absentToday;
+  absentToday,
+
+  /// التراجع عن «لن أعمل اليوم» لليوم نفسه (المرحلة 11).
+  absentCancelled;
 
   static DeviceEventType fromWire(String value) => switch (value) {
         'service_started' => DeviceEventType.serviceStarted,
@@ -175,6 +178,7 @@ enum DeviceEventType {
         'break_started' => DeviceEventType.breakStarted,
         'break_ended' => DeviceEventType.breakEnded,
         'absent_today' => DeviceEventType.absentToday,
+        'absent_cancelled' => DeviceEventType.absentCancelled,
         _ => throw FormatException('Unknown DeviceEventType: $value'),
       };
 
@@ -190,6 +194,7 @@ enum DeviceEventType {
         DeviceEventType.breakStarted => 'break_started',
         DeviceEventType.breakEnded => 'break_ended',
         DeviceEventType.absentToday => 'absent_today',
+        DeviceEventType.absentCancelled => 'absent_cancelled',
       };
 }
 

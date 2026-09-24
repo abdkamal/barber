@@ -177,6 +177,76 @@ describe('staff sync', () => {
     expect((await staffToday(ctx, b1!)).day.state).toBe('absent_today');
   });
 
+  it('phase 11: a barber undoes his own «لن أعمل اليوم» — booking resumes, managers told, idempotent, audited', async () => {
+    const s = await setupQueueSalon(ctx);
+    const b = s.barbers[0]!;
+    const c = await newCustomer(ctx, s);
+    await heartbeat(ctx, b);
+    expect((await push(ctx, b, [event(ctx, b, 'absent_today', null, { reason: 'مريض' })]))[0]!.result).toBe('applied');
+    const today = await staffToday(ctx, b);
+    expect(today.day.state).toBe('absent_today');
+    expect(today.day.absence).toEqual({ reason: 'مريض', recordedBy: 'self', canUndo: true });
+    // ق26: an emergency break on an absent day is refused with a clear code.
+    const brk = await push(ctx, b, [event(ctx, b, 'break_started', null, { kind: 'emergency' })]);
+    expect(brk[0]).toMatchObject({ result: 'rejected', reason: 'BARBER_ABSENT' });
+    expect((await book(ctx, c, { serviceIds: [s.services.haircut], barberId: b.id, kind: 'queue' })).body.error.code).toBe('BARBER_ABSENT');
+
+    clock(ctx).set(at(5));
+    const undo = event(ctx, b, 'absent_cancelled', null, {});
+    expect(await push(ctx, b, [undo])).toEqual([{ eventId: undo.id, result: 'applied' }]);
+    const after = await staffToday(ctx, b);
+    expect(after.day.state).not.toBe('absent_today');
+    expect(after.day.absence).toBeNull();
+    expect(await salonQuery(ctx, s.dbName, 'SELECT 1 FROM absences')).toHaveLength(0);
+    await heartbeat(ctx, b); // still connected (ق3)
+    const rebook = await book(ctx, c, { serviceIds: [s.services.haircut], barberId: b.id, kind: 'queue' });
+    expect(rebook.body).toMatchObject({ barberId: b.id });
+    // Retry of the same event: duplicate; a second undo: applied as a no-op.
+    expect((await push(ctx, b, [undo]))[0]!.result).toBe('duplicate');
+    expect((await push(ctx, b, [event(ctx, b, 'absent_cancelled', null, {})]))[0]).toMatchObject({ result: 'applied', reason: 'NOT_ABSENT' });
+    // Break allowed again once present.
+    expect((await push(ctx, b, [event(ctx, b, 'break_started', null, { kind: 'emergency' })]))[0]!.result).toBe('applied');
+    await settle(ctx);
+    const alerts = await notifications(ctx, s, "type = 'barber_absence_cancelled'");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].recipient_id).toBe(s.manager.id);
+    const audit = await salonQuery(ctx, s.dbName, "SELECT actor_id, details FROM audit_log WHERE action = 'staff.absence_cancelled'");
+    expect(audit).toHaveLength(1);
+    expect(audit[0].actor_id).toBe(b.id);
+    const ds = await salonQuery(ctx, s.dbName, "SELECT data FROM changes WHERE type = 'day_state' AND staff_id = $1 ORDER BY seq DESC LIMIT 1", [b.id]);
+    expect(ds[0].data.state).not.toBe('absent_today');
+  });
+
+  it('phase 11: a barber cannot undo an absence the manager recorded; the manager can (own day by event, any barber by DELETE)', async () => {
+    const s = await setupQueueSalon(ctx);
+    const b = s.barbers[0]!;
+    const workDate = (await staffToday(ctx, b)).day.workDate;
+    const created = await ctx
+      .http()
+      .post('/v1/manager/absences')
+      .set(auth(s.manager.accessToken))
+      .send({ staffId: b.id, workDate });
+    expect(created.status).toBe(201);
+    expect((await staffToday(ctx, b)).day.absence).toMatchObject({ recordedBy: 'manager', canUndo: false });
+    const refused = await push(ctx, b, [event(ctx, b, 'absent_cancelled', null, {})]);
+    expect(refused[0]).toMatchObject({ result: 'rejected', reason: 'ABSENCE_SET_BY_MANAGER' });
+    const del = await ctx.http().delete(`/v1/manager/absences/${created.body.id}`).set(auth(s.manager.accessToken));
+    expect(del.status).toBe(200);
+    expect((await staffToday(ctx, b)).day.state).not.toBe('absent_today');
+
+    // The manager (who also cuts hair) undoes his own absence from his device — no alert to himself.
+    for (let d = 0; d < 7; d++) {
+      await salonQuery(ctx, s.dbName, 'INSERT INTO work_schedules (staff_id, weekday, opens_at, closes_at) VALUES ($1, $2, $3, $4)', [s.manager.id, d, '09:00', '23:00']);
+    }
+    const m = { id: s.manager.id, username: s.manager.username, token: s.manager.accessToken, seq: 0 };
+    expect((await push(ctx, m, [event(ctx, m, 'absent_today', null, {})]))[0]!.result).toBe('applied');
+    expect((await staffToday(ctx, m)).day.absence).toMatchObject({ recordedBy: 'self', canUndo: true });
+    expect((await push(ctx, m, [event(ctx, m, 'absent_cancelled', null, {})]))[0]!.result).toBe('applied');
+    expect((await staffToday(ctx, m)).day.absence).toBeNull();
+    await settle(ctx);
+    expect(await notifications(ctx, s, "type = 'barber_absence_cancelled'")).toHaveLength(0);
+  });
+
   it('design §3: an offline start after the customer cancelled — the actual event wins, flagged for the manager', async () => {
     const s = await setupQueueSalon(ctx);
     const b = s.barbers[0]!;

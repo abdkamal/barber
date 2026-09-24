@@ -1,4 +1,4 @@
-import { normalizePhone, normalizeSalonCode, normalizeUsername, SALON_CODE_RE, USERNAME_RE } from './normalize';
+import { normalizeInternationalPhone, normalizePhone, normalizeSalonCode, normalizeUsername, SALON_CODE_RE, USERNAME_RE } from './normalize';
 
 describe('normalizePhone', () => {
   it('accepts plain and formatted numbers', () => {
@@ -16,6 +16,21 @@ describe('normalizePhone', () => {
     expect(normalizePhone('123')).toBeNull();
     expect(normalizePhone('+1234567890123456')).toBeNull();
     expect(normalizePhone('05O1234567')).toBeNull();
+  });
+});
+
+describe('normalizeInternationalPhone (WhatsApp, any country code)', () => {
+  it('accepts any country code with + or 00', () => {
+    expect(normalizeInternationalPhone('+970 59 123 4567')).toBe('+970591234567');
+    expect(normalizeInternationalPhone('00972-50-123-4567')).toBe('+972501234567');
+    expect(normalizeInternationalPhone('+1 (415) 555-0100')).toBe('+14155550100');
+    expect(normalizeInternationalPhone('+٩٦٦٥٠١٢٣٤٥٦٧')).toBe('+966501234567');
+  });
+  it('rejects local numbers and invalid lengths', () => {
+    expect(normalizeInternationalPhone('0591234567')).toBeNull();
+    expect(normalizeInternationalPhone('+0591234567')).toBeNull();
+    expect(normalizeInternationalPhone('+1234567')).toBeNull();
+    expect(normalizeInternationalPhone('+1234567890123456')).toBeNull();
   });
 });
 

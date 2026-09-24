@@ -5,17 +5,20 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:saloni_ui/saloni_ui.dart';
 
 import '../../core/format.dart';
+import '../../core/help_texts.dart';
 import '../../state/app_services.dart';
 import '../barber/more_screen.dart';
 import '../common/ui.dart';
 import 'manager_common.dart';
 
 class _SettingDef {
-  const _SettingDef(this.key, this.label, this.fallback, this.format, {this.max = 1440, this.min = 0});
+  const _SettingDef(this.key, this.label, this.fallback, this.format,
+      {required this.help, this.max = 1440, this.min = 0});
   final String key;
   final String label;
   final int fallback;
   final String Function(int) format;
+  final SaloniHelp help;
   final int max;
   final int min;
 }
@@ -32,16 +35,24 @@ String _immediate(int v) => v == 0 ? 'فورًا' : digits('$v د');
 
 /// الإعدادات وقيمها الافتراضية (design.md §11) — بمفاتيح السيرفر.
 const _bookingSettings = [
-  _SettingDef('maxActiveBookingsPerCustomer', 'الحجوزات النشطة لكل زبون', 1, _plain, min: 1, max: 10),
-  _SettingDef('bookingOpensBeforeMinutes', 'فتح الحجز قبل الافتتاح', 60, _mins),
-  _SettingDef('etaChangeNotifyMinutes', 'هامش التنبيه الإلزامي', 30, _mins, min: 1, max: 240),
-  _SettingDef('maxDisconnectWindowMinutes', 'نافذة الانقطاع القصوى', 120, _mins),
-  _SettingDef('offerHoldMinutes', 'مدة حجز العرض', 2, _mins, min: 1, max: 60),
-  _SettingDef('overrunAlertPercent', 'تنبيه تجاوز المدة', 100, _pct, min: 50, max: 500),
-  _SettingDef('gapMarginMinMinutes', 'هامش ملء الفراغ (أدنى)', 10, _mins, max: 240),
-  _SettingDef('gapMarginPercent', 'هامش ملء الفراغ (نسبة)', 25, _pct, max: 400),
+  _SettingDef('maxActiveBookingsPerCustomer', 'الحجوزات النشطة لكل زبون', 1, _plain,
+      help: HelpTexts.maxActiveBookingsPerCustomer, min: 1, max: 10),
+  _SettingDef('bookingOpensBeforeMinutes', 'فتح الحجز قبل الافتتاح', 60, _mins,
+      help: HelpTexts.bookingOpensBeforeMinutes),
+  _SettingDef('etaChangeNotifyMinutes', 'هامش التنبيه الإلزامي', 30, _mins,
+      help: HelpTexts.etaChangeNotifyMinutes, min: 1, max: 240),
+  _SettingDef('maxDisconnectWindowMinutes', 'نافذة الانقطاع القصوى', 120, _mins,
+      help: HelpTexts.maxDisconnectWindowMinutes),
+  _SettingDef('offerHoldMinutes', 'مدة حجز العرض', 2, _mins,
+      help: HelpTexts.offerHoldMinutes, min: 1, max: 60),
+  _SettingDef('overrunAlertPercent', 'تنبيه تجاوز المدة', 100, _pct,
+      help: HelpTexts.overrunAlertPercent, min: 50, max: 500),
+  _SettingDef('gapMarginMinMinutes', 'هامش ملء الفراغ (أدنى)', 10, _mins,
+      help: HelpTexts.gapMargin, max: 240),
+  _SettingDef('gapMarginPercent', 'هامش ملء الفراغ (نسبة)', 25, _pct,
+      help: HelpTexts.gapMargin, max: 400),
   _SettingDef('barberNotConnectedAlertMinutes', 'تنبيه عدم اتصال الحلاق بعد بدء دوامه', 0,
-      _immediate, max: 240),
+      _immediate, help: HelpTexts.barberNotConnectedAlertMinutes, max: 240),
 ];
 
 /// إعدادات المدير (M-Settings) + الإدارة + QR الصالون + تفضيلات التطبيق.
@@ -102,7 +113,7 @@ class _ManagerSettingsScreenState extends ConsumerState<ManagerSettingsScreen> {
       initial: '$current',
       type: SaloniTextFieldType.number,
       direction: TextDirection.ltr,
-      hint: digits('من ${d.min} إلى ${d.max}'),
+      hint: digits('${d.help.summary ?? ''} — من ${d.min} إلى ${d.max}'),
     );
     if (v == null) return;
     final n = parseIntInput(v);
@@ -115,7 +126,6 @@ class _ManagerSettingsScreenState extends ConsumerState<ManagerSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final prefs = ref.watch(prefsProvider);
     final auth = ref.watch(authProvider);
     final c = context.saloniColors;
     final s = _settings;
@@ -127,28 +137,15 @@ class _ManagerSettingsScreenState extends ConsumerState<ManagerSettingsScreen> {
         Expanded(
           child: PageBody(onRefresh: _load, children: [
             if (_error != null && s == null) SaloniBanner(tone: SaloniBannerTone.warning, body: errorText(_error!)),
-            Container(
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                color: c.line,
-                border: Border.all(color: c.line),
-                borderRadius: SaloniRadius.lgAll,
+            ClipRRect(
+              borderRadius: SaloniRadius.lgAll,
+              child: SettingSwitch(
+                label: 'اشتراط اعتماد الحسابات',
+                description: HelpTexts.requireAccountApproval.summary,
+                help: HelpTexts.requireAccountApproval,
+                checked: s?['requireAccountApproval'] == true,
+                onChanged: s == null ? null : (v) => _put({'requireAccountApproval': v}),
               ),
-              child: Column(children: [
-                SettingSwitch(
-                  label: 'اشتراط اعتماد الحسابات',
-                  description: 'لا يحجز الزبون الجديد حتى تعتمد حسابه',
-                  checked: s?['requireAccountApproval'] == true,
-                  onChanged: s == null ? null : (v) => _put({'requireAccountApproval': v}),
-                ),
-                const SizedBox(height: 1),
-                SettingSwitch(
-                  label: 'الأرقام العربية المشرقية',
-                  description: 'عرض ٠١٢٣ بدل 0123 على هذا الجهاز',
-                  checked: prefs.easternDigits,
-                  onChanged: prefs.setEasternDigits,
-                ),
-              ]),
             ),
             Section(title: 'الحجز', children: [
               GroupBox(children: [
@@ -156,6 +153,8 @@ class _ManagerSettingsScreenState extends ConsumerState<ManagerSettingsScreen> {
                   ValueRow(
                     first: i == 0,
                     label: _bookingSettings[i].label,
+                    help: _bookingSettings[i].help,
+                    helper: _bookingSettings[i].help.summary,
                     value: s == null
                         ? '—'
                         : _bookingSettings[i].format(
@@ -164,7 +163,10 @@ class _ManagerSettingsScreenState extends ConsumerState<ManagerSettingsScreen> {
                   ),
               ]),
             ]),
-            Section(title: 'فترات الحاضرين فقط', children: [
+            Section(
+                title: 'فترات الحاضرين فقط',
+                trailing: const SaloniHelpHint(HelpTexts.walkInOnlyPeriods),
+                children: [
               const SaloniBanner(
                 tone: SaloniBannerTone.info,
                 body: 'لا تُقبل حجوزات التطبيق في هذه الفترات، ويخدم فيها الحلاق زبائن حاضرين.',
@@ -215,7 +217,7 @@ class _ManagerSettingsScreenState extends ConsumerState<ManagerSettingsScreen> {
                   ),
                 ),
               ]),
-            const AppPreferencesSection(showDigits: false),
+            const AppPreferencesSection(),
           ]),
         ),
       ],

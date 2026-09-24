@@ -26,11 +26,11 @@ class BreaksScreen extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('لن أعمل اليوم', style: SaloniTextStyles.title2.copyWith(color: c.ink)),
+          Text('لن تعمل اليوم؟', style: SaloniTextStyles.title2.copyWith(color: c.ink)),
           const SizedBox(height: 8),
           Text(
-            'يتوقف الحجز عندك اليوم، ويُنبَّه المدير لنقل حجوزاتك القائمة يدويًا. '
-            'لا يُنقل أحد تلقائيًا.',
+            'يتوقف الحجز عندك اليوم فورًا، ويُنبَّه المدير لنقل حجوزاتك القائمة يدويًا '
+            '(لا يُنقل أحد تلقائيًا). تستطيع التراجع اليوم نفسه من هذه الشاشة.',
             style: SaloniTextStyles.body.copyWith(color: c.inkMuted),
           ),
           const SizedBox(height: 14),
@@ -38,7 +38,7 @@ class BreaksScreen extends ConsumerWidget {
           const SizedBox(height: 20),
           SaloniButton(
             key: const Key('absent-confirm'),
-            label: 'تأكيد',
+            label: 'نعم، لن أعمل اليوم',
             variant: SaloniButtonVariant.danger,
             size: SaloniButtonSize.lg,
             block: true,
@@ -46,6 +46,7 @@ class BreaksScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 10),
           SaloniButton(
+            key: const Key('absent-cancel'),
             label: 'تراجع',
             variant: SaloniButtonVariant.ghost,
             block: true,
@@ -54,17 +55,64 @@ class BreaksScreen extends ConsumerWidget {
         ],
       );
     });
-    if (ok == true) {
-      await ref.read(barberRepoProvider).reportAbsentToday(reason.text.trim());
-      if (context.mounted) toast(context, 'أُبلغ المدير أنك لن تعمل اليوم');
+    if (ok != true || !context.mounted) return;
+    final repo = ref.read(barberRepoProvider);
+    try {
+      // متفائل: تتغير الشاشة فورًا ويُرسل الحدث عند توفر الاتصال.
+      await repo.reportAbsentToday(reason.text.trim());
+      if (context.mounted) {
+        toast(
+          context,
+          repo.isOnline
+              ? 'سُجّل أنك لن تعمل اليوم — توقف الحجز عندك وأُبلغ المدير'
+              : 'سُجّل أنك لن تعمل اليوم — يُرسل للمدير عند عودة الاتصال',
+        );
+      }
+    } catch (e) {
+      if (context.mounted) toast(context, 'تعذّر التسجيل: ${errorText(e)}');
+    }
+  }
+
+  Future<void> _undoAbsent(BuildContext context, WidgetRef ref) async {
+    final ok = await confirmDialog(
+      context,
+      title: 'ستعمل اليوم؟',
+      body: 'يعود يومك إلى وضعه الطبيعي ويُستأنف الحجز عندك من الآن. '
+          'الحجوزات التي نقلها المدير إلى حلاق آخر أثناء غيابك تبقى حيث هي ولا تعود تلقائيًا.',
+      confirm: 'نعم، سأعمل اليوم',
+    );
+    if (!ok || !context.mounted) return;
+    final repo = ref.read(barberRepoProvider);
+    try {
+      await repo.cancelAbsentToday();
+      if (context.mounted) {
+        toast(
+          context,
+          repo.isOnline
+              ? 'عدت للعمل اليوم — استُؤنف الحجز عندك'
+              : 'عدت للعمل اليوم — يُرسل التراجع عند عودة الاتصال',
+        );
+      }
+    } catch (e) {
+      if (context.mounted) toast(context, 'تعذّر التراجع: ${errorText(e)}');
+    }
+  }
+
+  Future<void> _startBreak(BuildContext context, WidgetRef ref, sa.BreakKind kind) async {
+    try {
+      await ref.read(barberRepoProvider).startBreak(kind);
+    } catch (e) {
+      if (context.mounted) toast(context, errorText(e));
     }
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final repo = ref.watch(barberRepoProvider);
+    final isManager = ref.watch(authProvider).isManager;
     final c = context.saloniColors;
     final now = DateTime.now();
+    final absent = repo.absentToday;
     final active = repo.activeBreak;
     final breaks = [...repo.breaks]..sort((a, b) => a.start.compareTo(b.start));
 
@@ -104,10 +152,13 @@ class BreaksScreen extends ConsumerWidget {
                 size: SaloniButtonSize.lg,
                 variant: SaloniButtonVariant.secondary,
                 block: true,
-                onPressed: () => repo.startBreak(sa.BreakKind.emergency),
+                // ق26: لا استراحة في يوم «لن أعمل اليوم».
+                onPressed: absent ? null : () => _startBreak(context, ref, sa.BreakKind.emergency),
               ),
             if (active == null)
-              const Muted('سجّلها عند الحاجة المفاجئة؛ تُحدَّث أوقات زبائنك تلقائيًا.'),
+              Muted(absent
+                  ? 'غير متاحة لأنك أبلغت أنك لن تعمل اليوم. تراجع عن ذلك أولًا إن كنت ستعمل.'
+                  : 'سجّلها عند الحاجة المفاجئة؛ تُحدَّث أوقات زبائنك تلقائيًا.'),
             Section(title: 'استراحات اليوم', children: [
               if (breaks.isEmpty) const Muted('لا استراحات مجدولة اليوم.'),
               for (final b in breaks)
@@ -126,6 +177,7 @@ class BreaksScreen extends ConsumerWidget {
                       Text('${timeAr(b.start)} – ${timeAr(b.end)}',
                           style: SaloniTextStyles.body.copyWith(color: c.inkMuted)),
                       if (active == null &&
+                          !absent &&
                           !now.isBefore(b.start.subtract(const Duration(minutes: 15))) &&
                           now.isBefore(b.end)) ...[
                         const SizedBox(width: 8),
@@ -133,7 +185,7 @@ class BreaksScreen extends ConsumerWidget {
                           label: 'ابدأ',
                           size: SaloniButtonSize.sm,
                           variant: SaloniButtonVariant.secondary,
-                          onPressed: () => repo.startBreak(b.kind),
+                          onPressed: () => _startBreak(context, ref, b.kind),
                         ),
                       ],
                     ],
@@ -157,19 +209,39 @@ class BreaksScreen extends ConsumerWidget {
                   ),
               ]),
             Section(title: 'اليوم كله', children: [
-              repo.absentToday
-                  ? const SaloniBanner(
-                      tone: SaloniBannerTone.info,
-                      title: 'أبلغت أنك لن تعمل اليوم',
-                      body: 'للتراجع تواصل مع مدير الصالون.',
-                    )
-                  : SaloniButton(
-                      key: const Key('absent-today'),
-                      label: 'لن أعمل اليوم',
-                      variant: SaloniButtonVariant.danger,
-                      block: true,
-                      onPressed: () => _absent(context, ref),
-                    ),
+              if (!absent)
+                SaloniButton(
+                  key: const Key('absent-today'),
+                  label: 'لن أعمل اليوم',
+                  variant: SaloniButtonVariant.danger,
+                  block: true,
+                  onPressed: () => _absent(context, ref),
+                )
+              else ...[
+                SaloniBanner(
+                  key: const Key('absent-banner'),
+                  tone: SaloniBannerTone.warning,
+                  title: repo.absenceRecordedBySelf == false
+                      ? 'سجّل المدير أنك لن تعمل اليوم'
+                      : 'أبلغت أنك لن تعمل اليوم',
+                  body: [
+                    'الحجز متوقف عندك اليوم.',
+                    if (repo.absenceReason != null) 'السبب: ${repo.absenceReason}.',
+                    if (!repo.isOnline && repo.pending > 0) 'يُرسل عند عودة الاتصال.',
+                  ].join(' '),
+                ),
+                if (repo.canUndoAbsence(isManager: isManager))
+                  SaloniButton(
+                    key: const Key('absent-undo'),
+                    label: 'تراجع — سأعمل اليوم',
+                    icon: SaloniIconName.arrowUUpLeft,
+                    variant: SaloniButtonVariant.secondary,
+                    block: true,
+                    onPressed: () => _undoAbsent(context, ref),
+                  )
+                else
+                  const Muted('سجّل المدير غيابك؛ للتراجع تواصل مع مدير الصالون.'),
+              ],
             ]),
           ]),
         ),

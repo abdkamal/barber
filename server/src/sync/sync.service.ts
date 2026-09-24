@@ -28,6 +28,7 @@ import { Clock } from '../scheduling/clock';
 import {
   commitQueue,
   type DayCtx,
+  dbStateOf,
   type Effects,
   emitChange,
   estimateFor,
@@ -41,6 +42,7 @@ import {
   releaseExpiredOffers,
   resolveShift,
   shiftForDate,
+  stateOf,
   stateWire,
   toEntry,
   updateReference,
@@ -180,6 +182,7 @@ const BreakPayload = z
   .object({ kind: z.enum(['rest', 'prayer', 'emergency']), durationMin: z.number().int().min(1).max(240).optional() })
   .passthrough();
 const AbsentPayload = z.object({ reason: z.string().max(300).optional() }).passthrough();
+const AbsentCancelledPayload = z.object({}).passthrough();
 
 /** Known device event types and their payload schemas (validated before any DB work — review M4). */
 const EVENT_TYPES: Record<string, { payload?: z.ZodTypeAny; booking: boolean }> = {
@@ -194,6 +197,7 @@ const EVENT_TYPES: Record<string, { payload?: z.ZodTypeAny; booking: boolean }> 
   break_started: { payload: BreakPayload, booking: false },
   break_ended: { booking: false },
   absent_today: { payload: AbsentPayload, booking: false },
+  absent_cancelled: { payload: AbsentCancelledPayload, booking: false },
 };
 
 /** Why an event is junk before touching the database (null = well-formed). */
@@ -539,6 +543,8 @@ export class SyncService {
         return this.breakEnded(q, effects, c);
       case 'absent_today':
         return this.absent(q, effects, c);
+      case 'absent_cancelled':
+        return this.absentCancelled(q, effects, c);
       default:
         throw new Reject('UNKNOWN_EVENT_TYPE');
     }
@@ -934,6 +940,8 @@ export class SyncService {
     // An open break left over from an earlier day must not block today's (review, minor) — closed
     // under the day lock and before any change is emitted (lock order, round 2).
     const ctx = await this.lockToday(q, c, effects, (shift) => closeStaleOpenBreaks(q, c.t.salon.timezone, c.me.subjectId, c.now, effects, shift.workDate, ANY_STAFF));
+    // Phase 11 trial: no (emergency) break on a day the barber reported «لن أعمل اليوم» (ق26).
+    if (ctx.state.kind === 'absent') throw new Reject('BARBER_ABSENT');
     const { rows: open } = await q.query('SELECT 1 FROM breaks WHERE staff_id = $1 AND open', [c.me.subjectId]);
     if (open.length) throw new Reject('BREAK_ALREADY_OPEN');
     const before = project(ctx);
@@ -984,7 +992,53 @@ export class SyncService {
     await this.notifications.toManagers(q, effects, {
       type: 'barber_absent',
       text: Texts.barberAbsent(ctx.staff.name, open),
-      dedupeKey: `absent:${c.me.subjectId}:${ctx.shift.workDate}`,
+      // One alert per report (an absence undone and reported again alerts again).
+      dedupeKey: `absent:${c.me.subjectId}:${ctx.shift.workDate}:${c.ev.id}`,
+      data: { barberId: c.me.subjectId },
+    });
+    return {};
+  }
+
+  /**
+   * Phase 11 trial: undo «لن أعمل اليوم» for today. A manager may always undo (his own day, and any
+   * barber's through `DELETE /manager/absences/{id}`); a barber only an absence he reported himself.
+   * The day returns to its normal state and booking resumes; bookings the manager already moved stay
+   * where they are. Idempotent: nothing to undo → applied with reason `NOT_ABSENT`.
+   */
+  private async absentCancelled(q: TenantQueryable, effects: Effects, c: EvCtx): Promise<Applied> {
+    const ctx = await this.lockToday(q, c, effects);
+    const { rows } = await q.query<{ id: string; recorded_by_staff_id: string | null }>(
+      'SELECT id, recorded_by_staff_id FROM absences WHERE staff_id = $1 AND work_date = $2 FOR UPDATE',
+      [c.me.subjectId, ctx.shift.workDate],
+    );
+    const abs = rows[0];
+    if (!abs) {
+      await this.event(q, c, null, 'absent_cancelled', { workDate: ctx.shift.workDate, noop: true });
+      return { reason: 'NOT_ABSENT' };
+    }
+    if (c.me.role !== 'manager' && abs.recorded_by_staff_id !== c.me.subjectId) throw new Reject('ABSENCE_SET_BY_MANAGER');
+    const before = project(ctx);
+    await q.query('DELETE FROM absences WHERE id = $1', [abs.id]);
+    const fresh = await loadDay(q, c.t.salon, c.me.subjectId, ctx.shift, c.now, { lock: true, settings: ctx.settings, staff: ctx.staff, ...ANY_STAFF });
+    const state = stateOf(fresh.dayRow, false, c.now);
+    await q.query('UPDATE barber_days SET state = $2, updated_at = now() WHERE id = $1', [fresh.dayRow!.id, dbStateOf(state)]);
+    await commitQueue(q, fresh, fresh.queue, { reason: 'barber_returned', effects, actorKind: 'staff', actorId: c.me.subjectId, before });
+    await this.event(q, c, null, 'absent_cancelled', { workDate: ctx.shift.workDate, absenceId: abs.id });
+    await writeAudit(q, {
+      actorKind: 'staff',
+      actorId: c.me.subjectId,
+      action: 'staff.absence_cancelled',
+      targetKind: 'staff',
+      targetId: c.me.subjectId,
+      details: { workDate: ctx.shift.workDate, absenceId: abs.id, recordedBy: abs.recorded_by_staff_id, ...recovered(c) },
+    });
+    await emitChange(q, effects, { staffId: c.me.subjectId, type: 'day_state', entity: 'barber_day', data: { workDate: ctx.shift.workDate, state: stateWire(state) } });
+    // A manager undoing his own day needs no alert; a recovered event alerts nobody (ق40 F5).
+    if (c.me.role === 'manager' || c.recoveredBy) return {};
+    await this.notifications.toManagers(q, effects, {
+      type: 'barber_absence_cancelled',
+      text: Texts.barberAbsenceCancelled(ctx.staff.name),
+      dedupeKey: `absence_cancelled:${c.me.subjectId}:${ctx.shift.workDate}:${c.ev.id}`,
       data: { barberId: c.me.subjectId },
     });
     return {};

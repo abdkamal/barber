@@ -11,6 +11,8 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+  # ق41: لإجبار الأرقام الغربية في تنسيق التواريخ تحت لغة `ar` (يثبّت إصداره flutter_localizations).
+  intl: any
   saloni_ui:
     path: ../../packages/saloni_ui
   saloni_api:

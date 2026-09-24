@@ -85,6 +85,21 @@ class FakeServer {
 
   List<String> get eventTypes => [for (final e in events) e['type'] as String];
 
+  /// المرحلة 11: غياب اليوم كما يعرفه السيرفر (`day.state = absent_today` +
+  /// `day.absence`)، ومن سجّله. أحداث `absent_today`/`absent_cancelled` تغيّره.
+  bool absent = false;
+  bool absenceBySelf = true;
+
+  /// هل الحساب مدير (يستطيع التراجع دائمًا)؟ من [role].
+  bool get _canUndoAbsence => role == 'manager' || absenceBySelf;
+
+  /// `GET /manager/absences` و`DELETE /manager/absences/{id}`.
+  List<Map<String, dynamic>> managerAbsences = [];
+  final List<String> deletedAbsenceIds = [];
+
+  /// أجسام `POST /staff/walk-ins` بترتيب الوصول.
+  final List<Map<String, dynamic>> walkInBodies = [];
+
   /// حجز بالشكل الذي يرسله السيرفر (`BookingDto` + `customerPhone`) ويُضاف
   /// إلى طابور هذا الحلاق.
   Map<String, dynamic> booking({
@@ -287,8 +302,11 @@ class FakeServer {
             'workDate': '2026-09-24',
             'workStart': now.subtract(const Duration(hours: 3)).toIso8601String(),
             'workEnd': now.add(const Duration(hours: 8)).toIso8601String(),
-            'state': 'connected',
+            'state': absent ? 'absent_today' : 'connected',
             'firstConnectedAt': now.subtract(const Duration(hours: 3)).toIso8601String(),
+            'absence': absent
+                ? {'reason': null, 'recordedBy': absenceBySelf ? 'self' : 'manager', 'canUndo': _canUndoAbsence}
+                : null,
           },
           'queue': queue,
           'breaks': [],
@@ -303,13 +321,25 @@ class FakeServer {
       case 'POST /sync/events':
         final list = (body()['events'] as List).cast<Map<String, dynamic>>();
         events.addAll(list);
-        return json([
-          for (final e in list)
-            if (e['type'] == 'postponed' && rejectPostponeForBookingIds.contains(e['bookingId']))
-              {'eventId': e['id'], 'result': 'rejected', 'reason': 'التأجيل مستخدم مسبقًا لهذا الحجز'}
-            else
-              {'eventId': e['id'], 'result': 'applied'},
-        ]);
+        final results = <Map<String, dynamic>>[];
+        for (final e in list) {
+          final type = e['type'];
+          if (type == 'postponed' && rejectPostponeForBookingIds.contains(e['bookingId'])) {
+            results.add({'eventId': e['id'], 'result': 'rejected', 'reason': 'التأجيل مستخدم مسبقًا لهذا الحجز'});
+          } else if (type == 'break_started' && absent) {
+            results.add({'eventId': e['id'], 'result': 'rejected', 'reason': 'BARBER_ABSENT'});
+          } else if (type == 'absent_cancelled' && absent && !_canUndoAbsence) {
+            results.add({'eventId': e['id'], 'result': 'rejected', 'reason': 'ABSENCE_SET_BY_MANAGER'});
+          } else {
+            if (type == 'absent_today') {
+              absent = true;
+              absenceBySelf = true;
+            }
+            if (type == 'absent_cancelled') absent = false;
+            results.add({'eventId': e['id'], 'result': 'applied'});
+          }
+        }
+        return json(results);
       case 'GET /sync':
         return json({
           'changes': [],
@@ -327,6 +357,7 @@ class FakeServer {
         });
       case 'POST /staff/walk-ins':
         final b = body();
+        walkInBodies.add(b);
         final created = walkInResult ??
             booking(
               id: 'walk-${queue.length + 1}',
@@ -356,8 +387,9 @@ class FakeServer {
         return json(recoveredItems);
       case 'GET /manager/breaks':
       case 'GET /manager/phone-disputes':
-      case 'GET /manager/schedules':
       case 'GET /manager/absences':
+        return json(managerAbsences);
+      case 'GET /manager/schedules':
       case 'GET /manager/catalog':
       case 'GET /manager/services':
         return json([]);
@@ -386,6 +418,12 @@ class FakeServer {
           'peakHours': [for (var h = 0; h < 24; h++) {'hour': h, 'count': h == 18 ? 5 : 1}],
           'pendingItems': {'unconfirmedPayments': 2, 'syncConflicts': 0, 'pendingAccounts': 1, 'phoneDisputes': 0},
         });
+    }
+    if (req.method == 'DELETE' && path.startsWith('/manager/absences/')) {
+      final id = path.split('/')[3];
+      deletedAbsenceIds.add(id);
+      managerAbsences = [for (final a in managerAbsences) if (a['id'] != id) a];
+      return json({'ok': true});
     }
     if (req.method == 'POST' && path.startsWith('/manager/bookings/') && path.endsWith('/transfer')) {
       final id = path.split('/')[3];

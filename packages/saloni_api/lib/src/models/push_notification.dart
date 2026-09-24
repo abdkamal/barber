@@ -17,6 +17,9 @@ enum NotificationKind {
   /// للمدير.
   barberNotConnected('barber_not_connected'),
   barberAbsent('barber_absent'),
+
+  /// للمدير: تراجع حلاق عن «لن أعمل اليوم» (المرحلة 11).
+  barberAbsenceCancelled('barber_absence_cancelled'),
   syncConflict('sync_conflict'),
 
   /// للمدير: المدة الأساسية لخدمة تبدو غير واقعية مقارنة بالمدد الفعلية.
@@ -41,14 +44,20 @@ enum NotificationKind {
         noShow ||
         cancelledClosing ||
         transferred ||
-        barberAbsent =>
+        barberAbsent ||
+        barberAbsenceCancelled =>
           true,
         _ => false,
       };
 
   /// تنبيهات موجهة للمدير.
   bool get forManager => switch (this) {
-        barberNotConnected || barberAbsent || syncConflict || baseDurationSuspect => true,
+        barberNotConnected ||
+        barberAbsent ||
+        barberAbsenceCancelled ||
+        syncConflict ||
+        baseDurationSuspect =>
+          true,
         _ => false,
       };
 }

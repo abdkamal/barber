@@ -70,10 +70,11 @@ export class AbsencesController {
       async (q) => {
         const ok = await AbsencesRepo.delete(q, id);
         if (!ok) throw Errors.notFound();
-        await writeAudit(q, { actorKind: 'staff', actorId: me.subjectId, action: 'absence.removed', targetKind: 'absence', targetId: id, ip: clientIp(req) });
+        await writeAudit(q, { actorKind: 'staff', actorId: me.subjectId, action: 'absence.removed', targetKind: 'absence', targetId: id, ip: clientIp(req), details: { staffId: abs.staff_id, workDate: abs.work_date } });
         return { ok: true };
       },
-      { reason: 'schedule_changed', actorId: me.subjectId, afterDay: (q, effects, ctx) => this.changes.syncDayState(q, effects, ctx) },
+      // Phase 11 trial: the customers see why their time changed (the barber is back today).
+      { reason: 'barber_returned', actorId: me.subjectId, afterDay: (q, effects, ctx) => this.changes.syncDayState(q, effects, ctx) },
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saloni_ui/saloni_ui.dart';
 
 import '../../core/format.dart';
+import '../../core/help_texts.dart';
 import '../../state/app_services.dart';
 import '../common/shells.dart';
 import '../common/ui.dart';
@@ -38,16 +39,22 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
             const SizedBox(height: 14),
             SaloniTextField(label: 'الاسم', controller: name),
             const SizedBox(height: 12),
-            SaloniTextField(label: 'اسم المستخدم', controller: user, textDirection: TextDirection.ltr),
+            SaloniTextField(
+                label: 'اسم المستخدم',
+                controller: user,
+                textDirection: TextDirection.ltr,
+                help: HelpTexts.username),
             const SizedBox(height: 12),
             SaloniTextField(
               label: 'كلمة مرور مؤقتة',
               controller: pass,
               type: SaloniTextFieldType.password,
               textDirection: TextDirection.ltr,
-              hint: '10 أحرف على الأقل — سلّمها له بأمان',
+              help: HelpTexts.tempPassword,
             ),
             const SizedBox(height: 12),
+            const SaloniLabelWithHelp(label: 'الصلاحية', help: HelpTexts.role),
+            const SizedBox(height: 4),
             SaloniSegmentedControl(
               label: 'الصلاحية',
               value: role,
@@ -111,6 +118,8 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
                   style: SaloniTextStyles.code.copyWith(color: ctx.saloniColors.inkMuted)),
             ),
             const SizedBox(height: 14),
+            const SaloniLabelWithHelp(label: 'الصلاحية', help: HelpTexts.role),
+            const SizedBox(height: 4),
             SaloniSegmentedControl(
               label: 'الصلاحية',
               value: role,
@@ -125,7 +134,8 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
               borderRadius: SaloniRadius.lgAll,
               child: SettingSwitch(
                 label: 'الحساب نشط',
-                description: 'الإيقاف يُنهي جلساته فورًا',
+                description: HelpTexts.staffActive.summary,
+                help: HelpTexts.staffActive,
                 checked: active,
                 onChanged: (v) => setState(() => active = v),
               ),
@@ -136,7 +146,7 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
               controller: callAhead,
               type: SaloniTextFieldType.number,
               textDirection: TextDirection.ltr,
-              hint: 'يُستدعى الزبون عندما يصبح دوره ضمن هذه المدة',
+              help: HelpTexts.callAheadMinutes,
             ),
             const SizedBox(height: 20),
             SaloniButton(label: 'حفظ', size: SaloniButtonSize.lg, block: true, onPressed: () => Navigator.of(ctx).pop('save')),

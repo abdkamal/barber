@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:saloni_ui/saloni_ui.dart';
 
 import '../../core/format.dart';
+import '../../core/help_texts.dart';
 import '../../state/app_services.dart';
 import '../common/ui.dart';
 
@@ -126,6 +127,8 @@ class _CatalogEditorState extends ConsumerState<_CatalogEditor> {
       children: [
         SectionTitle(widget.item == null ? 'إضافة خدمة أو منتج' : 'تعديل ${str(widget.item, ['name'])}'),
         const SizedBox(height: 14),
+        const SaloniLabelWithHelp(label: 'النوع', help: HelpTexts.catalogVsService),
+        const SizedBox(height: 4),
         SaloniSegmentedControl(
           label: 'النوع',
           value: _kind,
@@ -140,7 +143,11 @@ class _CatalogEditorState extends ConsumerState<_CatalogEditor> {
         const SizedBox(height: 12),
         SaloniTextField(label: 'الوصف', controller: _desc),
         const SizedBox(height: 12),
-        SaloniTextField(label: 'المزايا', controller: _features, hint: 'افصل بينها بفاصلة: غسيل، تصفيف'),
+        SaloniTextField(
+            label: 'المزايا',
+            controller: _features,
+            hint: 'افصل بينها بفاصلة: غسيل، تصفيف',
+            help: HelpTexts.catalogFeatures),
         const SizedBox(height: 12),
         SaloniTextField(
           label: 'السعر',
@@ -151,7 +158,7 @@ class _CatalogEditorState extends ConsumerState<_CatalogEditor> {
         ),
         if (_kind == 'service' && widget.services.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Text('مرتبطة بالخدمة القابلة للحجز', style: SaloniTextStyles.label.copyWith(color: context.saloniColors.ink)),
+          const SaloniLabelWithHelp(label: 'مرتبطة بالخدمة القابلة للحجز', help: HelpTexts.catalogLinkedService),
           const SizedBox(height: 8),
           GroupBox(children: [
             for (var i = 0; i < widget.services.length; i++)
@@ -168,6 +175,7 @@ class _CatalogEditorState extends ConsumerState<_CatalogEditor> {
           borderRadius: SaloniRadius.lgAll,
           child: SettingSwitch(
             label: 'ظاهر للزبائن',
+            help: HelpTexts.catalogVisible,
             checked: _visible,
             onChanged: (v) => setState(() => _visible = v),
           ),
@@ -237,7 +245,8 @@ Future<bool> editService(
               label: 'المدة الأساسية (دقيقة)',
               controller: minutes,
               type: SaloniTextFieldType.number,
-              textDirection: TextDirection.ltr),
+              textDirection: TextDirection.ltr,
+              help: HelpTexts.baseDuration),
           const SizedBox(height: 12),
           SaloniTextField(
               label: 'السعر',
@@ -250,6 +259,7 @@ Future<bool> editService(
             borderRadius: SaloniRadius.lgAll,
             child: SettingSwitch(
               label: 'متاحة للحجز',
+              help: HelpTexts.serviceActive,
               checked: active,
               onChanged: (v) => setState(() => active = v),
             ),

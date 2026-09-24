@@ -24,6 +24,7 @@ export 'src/widgets/contact_bar.dart';
 export 'src/widgets/current_service_card.dart';
 export 'src/widgets/empty_state.dart';
 export 'src/widgets/eta_card.dart';
+export 'src/widgets/help_hint.dart';
 export 'src/widgets/hours_list.dart';
 export 'src/widgets/impact_list.dart';
 export 'src/widgets/offer_card.dart';

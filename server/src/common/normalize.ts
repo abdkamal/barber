@@ -21,6 +21,16 @@ export function normalizePhone(input: string): string | null {
   return /^\+?\d{7,15}$/.test(s) ? s : null;
 }
 
+/**
+ * An international number in E.164 form for WhatsApp links (wa.me needs the country code): same clean-up as
+ * normalizePhone, then "+" (or "00") followed by 8–15 digits, the first not 0. Any country code is accepted —
+ * nothing is prefixed or rewritten. Returns null otherwise (e.g. a local number without its country code).
+ */
+export function normalizeInternationalPhone(input: string): string | null {
+  const s = normalizePhone(input);
+  return s !== null && /^\+[1-9]\d{7,14}$/.test(s) ? s : null;
+}
+
 export function normalizeUsername(input: string): string {
   return input.trim().toLowerCase();
 }

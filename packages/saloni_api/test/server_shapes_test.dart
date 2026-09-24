@@ -169,6 +169,32 @@ void main() {
       expect(t.seq, 42);
     });
 
+    test('StaffToday day.absence (المرحلة 11) and absent_cancelled event type', () {
+      final day = StaffDay.fromJson({
+        'workDate': '2026-09-24',
+        'workStart': '2026-09-24T06:00:00.000Z',
+        'workEnd': '2026-09-24T20:00:00.000Z',
+        'state': 'absent_today',
+        'firstConnectedAt': null,
+        'absence': {'reason': 'مريض', 'recordedBy': 'self', 'canUndo': true},
+      });
+      expect(day.absentToday, isTrue);
+      expect(day.absence!.recordedBySelf, isTrue);
+      expect(day.absence!.canUndo, isTrue);
+      expect(day.absence!.reason, 'مريض');
+      expect(StaffDay.fromJson(day.toJson()).absence!.canUndo, isTrue);
+      final byManager = StaffDay.fromJson({
+        ...day.toJson(),
+        'absence': {'reason': null, 'recordedBy': 'manager', 'canUndo': false},
+      });
+      expect(byManager.absence!.recordedBySelf, isFalse);
+      expect(byManager.absence!.canUndo, isFalse);
+      // سيرفر أقدم لا يرسل الحقل.
+      expect(StaffDay.fromJson({...day.toJson()}..remove('absence')).absence, isNull);
+      expect(DeviceEventType.fromWire('absent_cancelled'), DeviceEventType.absentCancelled);
+      expect(DeviceEventType.absentCancelled.toWire(), 'absent_cancelled');
+    });
+
     test('StaffToday with no shift (day: null)', () {
       final t = StaffToday.fromJson({
         'day': null,
@@ -382,6 +408,10 @@ void main() {
       expect(s.kind, NotificationKind.baseDurationSuspect);
       expect(s.kind.forManager, isTrue);
       expect(PushNotification.fromData({'type': 'something_new'}).kind, NotificationKind.unknown);
+      final back = PushNotification.fromData({'type': 'barber_absence_cancelled', 'barberId': 'b1'});
+      expect(back.kind, NotificationKind.barberAbsenceCancelled);
+      expect(back.kind.forManager, isTrue);
+      expect(back.kind.affectsQueue, isTrue);
     });
   });
 

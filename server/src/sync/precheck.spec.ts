@@ -22,5 +22,7 @@ describe('device event pre-validation (review M4)', () => {
     expect(precheckEvent(ev('postponed', { steps: 2 }))).toBeNull();
     expect(precheckEvent(ev('break_started', { kind: 'rest' }, null))).toBeNull();
     expect(precheckEvent(ev('payment_confirmed', { amount: 5000 }))).toBeNull();
+    expect(precheckEvent(ev('absent_today', { reason: 'مريض' }, null))).toBeNull();
+    expect(precheckEvent(ev('absent_cancelled', {}, null))).toBeNull();
   });
 });

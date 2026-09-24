@@ -278,10 +278,20 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       ));
     }
     if (repo.absentToday) {
-      children.add(const SaloniBanner(
-        tone: SaloniBannerTone.info,
-        title: 'أبلغت أنك لن تعمل اليوم',
-        body: 'توقف الحجز عندك، ويُنبَّه المدير لنقل حجوزاتك القائمة.',
+      children.add(SaloniBanner(
+        tone: SaloniBannerTone.warning,
+        title: repo.absenceRecordedBySelf == false
+            ? 'سجّل المدير أنك لن تعمل اليوم'
+            : 'أبلغت أنك لن تعمل اليوم',
+        body: 'توقف الحجز عندك، ويُنبَّه المدير لنقل حجوزاتك القائمة. '
+            'للتراجع افتح «استراحاتي».',
+        action: SaloniButton(
+          key: const Key('absent-open-breaks'),
+          label: 'استراحاتي',
+          size: SaloniButtonSize.sm,
+          variant: SaloniButtonVariant.secondary,
+          onPressed: () => context.go('/b/breaks'),
+        ),
       ));
     }
     if (repo.activeBreak != null) {

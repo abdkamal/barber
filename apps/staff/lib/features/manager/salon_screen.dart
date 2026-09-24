@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:saloni_api/saloni_api.dart' show normalizeInternationalPhone;
 import 'package:saloni_ui/saloni_ui.dart';
 
 import '../../core/format.dart';
+import '../../core/help_texts.dart';
 import '../../state/app_services.dart';
 import '../common/ui.dart';
 import 'manager_common.dart';
@@ -89,7 +91,22 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
     if (mounted) setState(() => _loading = false);
   }
 
+  String? _whatsappError;
+
+  /// رقم واتساب دولي كامل أو فارغ (null). يعيد `false` إن كان غير صالح.
+  (bool, String?) _whatsappValue() {
+    final raw = _whatsapp.text.trim();
+    if (raw.isEmpty) return (true, null);
+    final n = normalizeInternationalPhone(raw);
+    return (n != null, n);
+  }
+
   Future<void> _save() async {
+    final (waOk, wa) = _whatsappValue();
+    setState(() => _whatsappError =
+        waOk ? null : 'اكتب الرقم كاملًا مع رمز الدولة ويبدأ بـ + (مثل ‎+970 59 123 4567)');
+    if (!waOk) return;
+    if (wa != null) _whatsapp.text = wa;
     setState(() => _saving = true);
     try {
       await ref.read(servicesProvider).api.updateManagerProfile({
@@ -97,7 +114,7 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
         'about': _nullIfEmpty(_about.text),
         'address': _nullIfEmpty(_address.text),
         'phone': _nullIfEmpty(_phone.text),
-        'whatsapp': _nullIfEmpty(_whatsapp.text),
+        'whatsapp': wa,
         'socialLinks': [
           if (_instagram.text.trim().isNotEmpty)
             {'platform': 'instagram', 'url': _instagramUrl(_instagram.text.trim())},
@@ -258,13 +275,18 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
                       label: 'هاتف الصالون',
                       controller: _phone,
                       type: SaloniTextFieldType.tel,
-                      textDirection: TextDirection.ltr),
+                      textDirection: TextDirection.ltr,
+                      help: HelpTexts.salonPhone),
+                  // ملاحظة التجربة: لا بادئة دولة ثابتة — يكتب المدير الرقم الدولي
+                  // كاملًا بأي رمز دولة (E.164)، ويُفتح wa.me بأرقامه دون «+».
                   SaloniTextField(
-                      label: 'واتساب',
+                      label: 'واتساب (اختياري)',
                       controller: _whatsapp,
-                      prefix: '+966',
+                      placeholder: '+970 59 123 4567',
                       type: SaloniTextFieldType.tel,
-                      textDirection: TextDirection.ltr),
+                      textDirection: TextDirection.ltr,
+                      error: _whatsappError,
+                      help: HelpTexts.whatsapp),
                   SaloniTextField(
                       label: 'إنستغرام (اختياري)',
                       controller: _instagram,
@@ -323,7 +345,10 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
                         ),
                     ],
                   ),
-                  Section(title: 'الخدمات والمنتجات', children: [
+                  Section(
+                      title: 'الخدمات والمنتجات',
+                      trailing: const SaloniHelpHint(HelpTexts.catalogVsService),
+                      children: [
                     const Muted('تظهر للزبائن بأسعارها ووصفها. المنتجات للعرض فقط.'),
                     for (final item in _catalog)
                       InkWell(
@@ -359,7 +384,10 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
                       },
                     ),
                   ]),
-                  Section(title: 'الخدمات القابلة للحجز', children: [
+                  Section(
+                      title: 'الخدمات القابلة للحجز',
+                      trailing: const SaloniHelpHint(HelpTexts.catalogVsService),
+                      children: [
                     const Muted('المدة الأساسية والسعر اللذان يعتمد عليهما الحجز والتقدير.'),
                     GroupBox(children: [
                       if (_services.isEmpty) const ValueRow(first: true, label: 'لا خدمات بعد', value: ''),

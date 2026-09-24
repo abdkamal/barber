@@ -16,6 +16,7 @@ export type NotificationType =
   | 'account_pending'
   | 'barber_not_connected'
   | 'barber_absent'
+  | 'barber_absence_cancelled'
   | 'sync_conflict'
   | 'base_duration_suspect';
 

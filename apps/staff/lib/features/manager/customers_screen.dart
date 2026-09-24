@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saloni_ui/saloni_ui.dart';
 import 'package:saloni_api/saloni_api.dart' as sa;
 
+import '../../core/help_texts.dart';
 import '../../state/app_services.dart';
 import '../common/shells.dart';
 import '../common/ui.dart';
@@ -56,7 +57,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          SectionTitle(str(c, ['name'], 'زبون')),
+          SectionTitle(str(c, ['name'], 'زبون'), trailing: const SaloniHelpHint(HelpTexts.customerActions)),
           Directionality(
             textDirection: TextDirection.ltr,
             child: Text(str(c, ['phone']),

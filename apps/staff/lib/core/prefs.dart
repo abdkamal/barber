@@ -4,13 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/models.dart';
-import 'format.dart';
 
 /// تفضيلات غير سرية على الجهاز (المظهر، الجولة التعريفية، آخر رمز صالون...).
 /// الأسرار (رموز الجلسة، مفتاح القاعدة) في التخزين الآمن فقط.
 class AppPrefs extends ChangeNotifier {
   AppPrefs(this._p) {
-    numeralStyle = easternDigits ? NumeralStyle.eastern : NumeralStyle.latin;
+    // ق41: أُلغي خيار «الأرقام العربية المشرقية» — الأرقام غربية دائمًا.
+    // يُحذف التفضيل القديم إن وُجد (دون انتظار؛ لا يؤثر شيء على قيمته).
+    if (_p.containsKey('easternDigits')) _p.remove('easternDigits');
   }
 
   final SharedPreferences _p;
@@ -23,14 +24,6 @@ class AppPrefs extends ChangeNotifier {
 
   Future<void> setThemeMode(ThemeMode m) async {
     await _p.setString('theme', m == ThemeMode.light ? 'light' : 'dark');
-    notifyListeners();
-  }
-
-  bool get easternDigits => _p.getBool('easternDigits') ?? false;
-
-  Future<void> setEasternDigits(bool v) async {
-    await _p.setBool('easternDigits', v);
-    numeralStyle = v ? NumeralStyle.eastern : NumeralStyle.latin;
     notifyListeners();
   }
 

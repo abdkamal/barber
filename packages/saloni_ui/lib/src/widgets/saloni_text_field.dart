@@ -6,6 +6,7 @@ import '../tokens/saloni_radius.dart';
 import '../tokens/saloni_sizes.dart';
 import '../tokens/saloni_spacing.dart';
 import '../tokens/saloni_typography.dart';
+import 'help_hint.dart';
 
 enum SaloniTextFieldType { text, password, tel, number }
 
@@ -22,6 +23,7 @@ class SaloniTextField extends StatefulWidget {
     this.error,
     this.textDirection,
     this.onChanged,
+    this.help,
   });
 
   final String label;
@@ -36,6 +38,10 @@ class SaloniTextField extends StatefulWidget {
   final TextDirection? textDirection;
   final ValueChanged<String>? onChanged;
 
+  /// شرح الحقل: ⓘ بجانب العنوان يفتح ورقة الشرح، و`help.summary` يُعرض سطرًا
+  /// مساعدًا تحت الحقل إن لم يُعطَ [hint].
+  final SaloniHelp? help;
+
   @override
   State<SaloniTextField> createState() => _SaloniTextFieldState();
 }
@@ -49,6 +55,7 @@ class _SaloniTextFieldState extends State<SaloniTextField> {
     final hasError = widget.error != null && widget.error!.isNotEmpty;
     final borderColor = hasError ? c.danger : c.lineStrong;
     final isPassword = widget.type == SaloniTextFieldType.password;
+    final hint = (widget.hint?.isNotEmpty ?? false) ? widget.hint : widget.help?.summary;
 
     TextInputType keyboardType;
     switch (widget.type) {
@@ -66,11 +73,8 @@ class _SaloniTextFieldState extends State<SaloniTextField> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          widget.label,
-          style: SaloniTextStyles.label.copyWith(color: c.ink),
-        ),
-        const SizedBox(height: SaloniSpacing.space2),
+        SaloniLabelWithHelp(label: widget.label, help: widget.help),
+        SizedBox(height: widget.help == null ? SaloniSpacing.space2 : SaloniSpacing.space1),
         Container(
           constraints: const BoxConstraints(minHeight: SaloniSizes.controlMd),
           decoration: BoxDecoration(
@@ -149,7 +153,7 @@ class _SaloniTextFieldState extends State<SaloniTextField> {
             ],
           ),
         ),
-        if (hasError || (widget.hint?.isNotEmpty ?? false)) ...[
+        if (hasError || (hint?.isNotEmpty ?? false)) ...[
           const SizedBox(height: SaloniSpacing.space2),
           Row(
             mainAxisSize: MainAxisSize.min,
@@ -165,7 +169,7 @@ class _SaloniTextFieldState extends State<SaloniTextField> {
                 ),
               Flexible(
                 child: Text(
-                  hasError ? widget.error! : widget.hint!,
+                  hasError ? widget.error! : hint!,
                   style: SaloniTextStyles.caption.copyWith(
                     color: hasError ? c.danger : c.inkMuted,
                   ),

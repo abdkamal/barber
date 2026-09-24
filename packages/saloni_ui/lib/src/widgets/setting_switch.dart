@@ -4,6 +4,7 @@ import '../theme/saloni_theme.dart';
 import '../tokens/saloni_radius.dart';
 import '../tokens/saloni_spacing.dart';
 import '../tokens/saloni_typography.dart';
+import 'help_hint.dart';
 
 /// صف إعداد بمفتاح تبديل — `Switch` في `index.d.ts` (سُمّي `SettingSwitch`
 /// في Dart لتفادي التعارض مع `Switch` من Material).
@@ -14,12 +15,16 @@ class SettingSwitch extends StatefulWidget {
     this.description,
     this.checked = false,
     this.onChanged,
+    this.help,
   });
 
   final String label;
   final String? description;
   final bool checked;
   final ValueChanged<bool>? onChanged;
+
+  /// شرح الإعداد: ⓘ بجانب العنوان يفتح ورقة الشرح.
+  final SaloniHelp? help;
 
   @override
   State<SettingSwitch> createState() => _SettingSwitchState();
@@ -55,8 +60,9 @@ class _SettingSwitchState extends State<SettingSwitch> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  widget.label,
+                SaloniLabelWithHelp(
+                  label: widget.label,
+                  help: widget.help,
                   style: SaloniTextStyles.label.copyWith(
                     color: c.ink,
                     fontWeight: FontWeight.w500,

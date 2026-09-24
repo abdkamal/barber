@@ -177,9 +177,28 @@ void main() {
     expect(Currency.of('SAR').format(124000), '1,240 ر.س');
     expect(Currency.of('KWD').format(1500), '1.500 د.ك');
     expect(Currency.of('SAR').parse('٦٠'), 6000);
-    numeralStyle = NumeralStyle.eastern;
-    expect(digits('10:05'), '١٠:٠٥');
-    numeralStyle = NumeralStyle.latin;
+    // ق41: الأرقام غربية دائمًا — حتى لو وصل نص بأرقام مشرقية.
+    expect(digits('١٠:٠٥'), '10:05');
+    expect(Currency.of('ILS').format(4500), '45 ₪');
+  });
+
+  test('ملاحظة التجربة: الساعة 9 تبقى 9 مهما كان توقيت الجهاز أو الصالون', () {
+    final saved = salonTimezone;
+    try {
+      // اختيار الساعة 9:00 في منتقي الوقت يُحفظ «09:00» ويُعرض «9:00 ص» —
+      // قبل الإصلاح كانت تُحوَّل من توقيت الجهاز إلى توقيت الصالون فتظهر 10
+      // (أو 12 على جهاز اختبار بتوقيت UTC).
+      for (final tz in ['Asia/Riyadh', 'Asia/Hebron', 'Africa/Cairo', 'UTC']) {
+        salonTimezone = tz;
+        expect(wireTime(9 * 60), '09:00');
+        expect(displayWireTime('09:00'), '9:00 ص', reason: tz);
+        expect(displayWireTime(wireTime(21 * 60 + 30)), '9:30 م', reason: tz);
+        expect(displayWireTime('00:15'), '12:15 ص');
+        expect(displayWireTime('12:00'), '12:00 م');
+      }
+    } finally {
+      salonTimezone = saved;
+    }
   });
 
   test('معاينة الأثر: شكل السيرفر (changes + pastClosing)', () {

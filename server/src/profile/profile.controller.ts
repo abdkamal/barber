@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { Roles } from '../auth/auth.decorators';
 import type { Principal } from '../auth/principal';
 import { ZodPipe } from '../common/zod.pipe';
-import { normalizePhone } from '../common/normalize';
+import { normalizeInternationalPhone, normalizePhone } from '../common/normalize';
 import { Errors } from '../common/errors';
 import { writeAudit } from '../security/audit';
 import { clientIp } from '../security/client-ip';
@@ -92,8 +92,8 @@ export class ProfileController {
       patch.phone = normalized;
     }
     if (body.whatsapp !== undefined) {
-      const normalized = body.whatsapp === null ? null : normalizePhone(body.whatsapp);
-      if (body.whatsapp !== null && normalized === null) throw Errors.validation([{ path: 'whatsapp', code: 'invalid_phone' }]);
+      const normalized = body.whatsapp === null ? null : normalizeInternationalPhone(body.whatsapp);
+      if (body.whatsapp !== null && normalized === null) throw Errors.validation([{ path: 'whatsapp', code: 'invalid_international_phone' }]);
       patch.whatsapp = normalized;
     }
     if (body.socialLinks !== undefined) patch.socialLinks = body.socialLinks;

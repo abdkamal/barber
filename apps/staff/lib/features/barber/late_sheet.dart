@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:saloni_ui/saloni_ui.dart';
 
 import '../../core/format.dart';
+import '../../core/help_texts.dart';
 import '../../data/barber_repository.dart';
 import '../../data/models.dart';
 import '../common/ui.dart';
@@ -80,6 +81,8 @@ class _LateSheetState extends State<LateSheet> {
         ),
         if (canPostponeAgain) ...[
           const SizedBox(height: 14),
+          const SaloniLabelWithHelp(label: 'التأجيل بعدد الأدوار', help: HelpTexts.postponeSteps),
+          const SizedBox(height: 4),
           SaloniSegmentedControl(
             label: 'عدد الأدوار',
             value: _steps,

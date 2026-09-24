@@ -1,23 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:saloni_api/saloni_api.dart' show serverWeekday;
+import 'package:saloni_api/saloni_api.dart' show SaloniCurrency, serverWeekday;
 import 'package:saloni_ui/saloni_ui.dart';
 
 import '../../core/format.dart';
+import '../../core/help_texts.dart';
 import '../../state/app_services.dart';
 import '../common/ui.dart';
 
-/// العملات المتاحة عند إنشاء الصالون (ق34) مع منطقة زمنية افتراضية.
-const signupCurrencies = [
-  ('SAR', 'ريال سعودي', 'Asia/Riyadh'),
-  ('AED', 'درهم إماراتي', 'Asia/Dubai'),
-  ('KWD', 'دينار كويتي', 'Asia/Kuwait'),
-  ('QAR', 'ريال قطري', 'Asia/Qatar'),
-  ('BHD', 'دينار بحريني', 'Asia/Bahrain'),
-  ('OMR', 'ريال عماني', 'Asia/Muscat'),
-  ('JOD', 'دينار أردني', 'Asia/Amman'),
-  ('EGP', 'جنيه مصري', 'Africa/Cairo'),
+/// العملات المتاحة عند إنشاء الصالون (ق34، ق41) — من التعريف المشترك، مع
+/// منطقة زمنية مقترحة لكل منها. **بلا أعلام**: رمز العملة هو علامتها.
+final List<SaloniCurrency> signupCurrencies = [
+  for (final c in SaloniCurrency.supported)
+    if (c.defaultTimezone != null) c,
+];
+
+/// منطقة الصالون الزمنية (تُعرض بها كل الأوقات — design.md §2). تُقترح من
+/// العملة ويمكن تغييرها: العملة لا تحدد البلد دائمًا (مثلًا الدينار الأردني أو
+/// الشيكل في فلسطين، والأردن وفلسطين بتوقيتين مختلفين شتاءً).
+const signupRegions = [
+  ('Asia/Riyadh', 'السعودية'),
+  ('Asia/Dubai', 'الإمارات'),
+  ('Asia/Kuwait', 'الكويت'),
+  ('Asia/Qatar', 'قطر'),
+  ('Asia/Bahrain', 'البحرين'),
+  ('Asia/Muscat', 'عُمان'),
+  ('Asia/Amman', 'الأردن'),
+  ('Asia/Hebron', 'فلسطين — الضفة'),
+  ('Asia/Gaza', 'فلسطين — غزة'),
+  ('Asia/Jerusalem', 'القدس'),
+  ('Africa/Cairo', 'مصر'),
 ];
 
 class _Day {
@@ -63,6 +76,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   final _address = TextEditingController();
   final _about = TextEditingController();
   String _currency = 'SAR';
+  String _timezone = 'Asia/Riyadh';
+  bool _timezoneChosen = false;
   // الخطوة 3
   final List<_Day> _days = [for (final d in weekdaysFromSaturday) _Day(d.$1, d.$2)];
   // الخطوة 4
@@ -109,13 +124,13 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   Future<void> _submit() async {
     setState(() => _busy = true);
     final services = ref.read(servicesProvider);
-    final currency = signupCurrencies.firstWhere((c) => c.$1 == _currency);
+    final currency = signupCurrencies.firstWhere((c) => c.code == _currency);
     try {
       final code = await ref.read(authProvider).registerSalon(
         salonData: {
           'name': _salonName.text.trim(),
-          'timezone': currency.$3,
-          'currency': currency.$1,
+          'timezone': _timezone,
+          'currency': currency.code,
           if (_phone.text.trim().isNotEmpty) 'phone': _phone.text.trim(),
           if (_address.text.trim().isNotEmpty) 'address': _address.text.trim(),
           if (_about.text.trim().isNotEmpty) 'about': _about.text.trim(),
@@ -127,7 +142,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         },
       );
       // ساعات العمل والخدمات تُحفظ بجلسة المدير الجديدة (أفضل جهد).
-      final cur = Currency.of(currency.$1);
+      final cur = Currency.of(currency.code);
       // ساعات الصالون = دوام افتراضي لكل يوم (staffId: null) يظهر للزبائن.
       for (final d in _days.where((d) => d.open)) {
         try {
@@ -214,7 +229,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           const Muted('ستصبح مدير الصالون بهذا الحساب.'),
           SaloniTextField(label: 'اسمك', controller: _ownerName),
           SaloniTextField(
-              label: 'اسم المستخدم', controller: _username, textDirection: TextDirection.ltr),
+              label: 'اسم المستخدم',
+              controller: _username,
+              textDirection: TextDirection.ltr,
+              help: HelpTexts.username),
           SaloniTextField(
               label: 'كلمة المرور',
               controller: _pass,
@@ -234,25 +252,56 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               label: 'هاتف الصالون (اختياري)',
               controller: _phone,
               type: SaloniTextFieldType.tel,
-              textDirection: TextDirection.ltr),
+              textDirection: TextDirection.ltr,
+              help: HelpTexts.salonPhone),
           SaloniTextField(label: 'العنوان (اختياري)', controller: _address),
           SaloniTextField(label: 'نبذة (اختياري)', controller: _about),
-          Section(title: 'العملة', children: [
-            const Muted('تُعرض بها الأسعار والإيرادات. تُضبط مرة عند الإنشاء.'),
-            GroupBox(children: [
-              for (var i = 0; i < signupCurrencies.length; i++)
-                _ChoiceRow(
-                  label: signupCurrencies[i].$2,
-                  selected: _currency == signupCurrencies[i].$1,
-                  first: i == 0,
-                  onTap: () => setState(() => _currency = signupCurrencies[i].$1),
-                ),
-            ]),
-          ]),
+          Section(
+              title: 'العملة',
+              trailing: const SaloniHelpHint(HelpTexts.currency),
+              children: [
+                const Muted('تُعرض بها الأسعار والإيرادات. تُضبط مرة عند الإنشاء.'),
+                GroupBox(children: [
+                  for (var i = 0; i < signupCurrencies.length; i++)
+                    _ChoiceRow(
+                      key: Key('currency-${signupCurrencies[i].code}'),
+                      leading: signupCurrencies[i].symbol,
+                      label: signupCurrencies[i].nameAr,
+                      selected: _currency == signupCurrencies[i].code,
+                      first: i == 0,
+                      onTap: () => setState(() {
+                        _currency = signupCurrencies[i].code;
+                        if (!_timezoneChosen) {
+                          _timezone = signupCurrencies[i].defaultTimezone ?? _timezone;
+                        }
+                      }),
+                    ),
+                ]),
+              ]),
+          Section(
+              title: 'بلد الصالون (التوقيت)',
+              trailing: const SaloniHelpHint(HelpTexts.region),
+              children: [
+                const Muted('تُعرض كل المواعيد بتوقيت الصالون.'),
+                GroupBox(children: [
+                  for (var i = 0; i < signupRegions.length; i++)
+                    _ChoiceRow(
+                      key: Key('region-${signupRegions[i].$1}'),
+                      label: signupRegions[i].$2,
+                      selected: _timezone == signupRegions[i].$1,
+                      first: i == 0,
+                      onTap: () => setState(() {
+                        _timezone = signupRegions[i].$1;
+                        _timezoneChosen = true;
+                      }),
+                    ),
+                ]),
+              ]),
         ]);
       case 2:
         return PageBody(gap: 10, children: [
-          const Muted('ساعات الصالون كما تظهر للزبائن. دوام كل حلاق يُضبط لاحقًا من «الدوام».'),
+          const SaloniLabelWithHelp(label: 'ساعات الصالون', help: HelpTexts.salonHours),
+          const Muted('كما تظهر للزبائن. دوام كل حلاق يُضبط لاحقًا من «الدوام».'),
           for (final d in _days) _DayRow(day: d, onChanged: () => setState(() {})),
         ]);
       case 3:
@@ -315,7 +364,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               label: 'المدة الأساسية (دقيقة)',
               controller: minutes,
               type: SaloniTextFieldType.number,
-              textDirection: TextDirection.ltr),
+              textDirection: TextDirection.ltr,
+              help: HelpTexts.baseDuration),
           const SizedBox(height: 12),
           SaloniTextField(
               label: 'السعر',
@@ -336,8 +386,18 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 }
 
 class _ChoiceRow extends StatelessWidget {
-  const _ChoiceRow({required this.label, required this.selected, required this.onTap, this.first = false});
+  const _ChoiceRow({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.first = false,
+    this.leading,
+  });
   final String label;
+
+  /// علامة بصرية قبل الاسم — رمز العملة (مثل ₪)، لا علم دولة (ق41).
+  final String? leading;
   final bool selected;
   final VoidCallback onTap;
   final bool first;
@@ -359,6 +419,26 @@ class _ChoiceRow extends StatelessWidget {
               border: BorderDirectional(top: first ? BorderSide.none : BorderSide(color: c.line)),
             ),
             child: Row(children: [
+              if (leading != null) ...[
+                Container(
+                  width: 40,
+                  height: 32,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: c.surfaceSunken,
+                    borderRadius: SaloniRadius.smAll,
+                    border: Border.all(color: c.line),
+                  ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(leading!,
+                        maxLines: 1,
+                        style: SaloniTextStyles.bodyStrong.copyWith(color: c.ink)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
               Expanded(child: Text(label, style: SaloniTextStyles.body.copyWith(color: c.ink))),
               if (selected) SaloniIcon(SaloniIconName.check, color: c.primary, size: 20),
             ]),

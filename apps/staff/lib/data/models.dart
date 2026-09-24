@@ -319,13 +319,22 @@ class RejectedEvent {
     sa.DeviceEventType.breakStarted: 'بدء الاستراحة',
     sa.DeviceEventType.breakEnded: 'إنهاء الاستراحة',
     sa.DeviceEventType.absentToday: '«لن أعمل اليوم»',
+    sa.DeviceEventType.absentCancelled: 'التراجع عن «لن أعمل اليوم»',
+  };
+
+  /// أسباب رفض معروفة بنص عربي بدل الرمز.
+  static const _reasons = {
+    'BARBER_ABSENT': 'أنت مسجّل «لن أعمل اليوم»',
+    'ABSENCE_SET_BY_MANAGER': 'سجّل المدير غيابك اليوم؛ التراجع عنه من المدير',
+    'BREAK_ALREADY_OPEN': 'لديك استراحة مفتوحة',
+    'NOT_WORKING': 'لا دوام لك الآن',
   };
 
   /// رسالة عربية واضحة تُعرض للحلاق: ماذا رُفض ولماذا.
   String get arabicMessage {
     final action = _actionNames[type] ?? 'إجراء';
     final who = customerName == null ? '' : ' لـ$customerName';
-    final why = (reason == null || reason!.isEmpty) ? '' : ' — السبب: $reason';
+    final why = (reason == null || reason!.isEmpty) ? '' : ' — السبب: ${_reasons[reason] ?? reason}';
     return 'رفض السيرفر $action$who$why. راجع حالة الحجز الحالية.';
   }
 }

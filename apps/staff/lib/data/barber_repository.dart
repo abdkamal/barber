@@ -72,6 +72,18 @@ class BarberRepository extends ChangeNotifier {
   ActiveBreak? activeBreak;
   bool absentToday = false;
 
+  /// من سجّل غياب اليوم: `true` هذا الحساب نفسه (من هذا الجهاز أو غيره)،
+  /// `false` المدير، `null` غير معروف (سيرفر أقدم). الحلاق يتراجع فقط عن غياب
+  /// سجّله بنفسه؛ المدير يتراجع دائمًا (المرحلة 11).
+  bool? absenceRecordedBySelf;
+
+  /// سبب الغياب إن ذكره من سجّله.
+  String? absenceReason;
+
+  /// هل يستطيع هذا الحساب التراجع عن غياب اليوم؟ [isManager] من جلسة الدخول.
+  bool canUndoAbsence({required bool isManager}) =>
+      absentToday && (isManager || absenceRecordedBySelf != false);
+
   /// لا دوام لهذا الحلاق اليوم (`day: null` من السيرفر).
   bool noShiftToday = false;
   List<PaymentView> serverPayments = const [];
@@ -254,6 +266,8 @@ class BarberRepository extends ChangeNotifier {
           ),
       ];
       absentToday = app['absentToday'] == true;
+      absenceRecordedBySelf = app['absenceRecordedBySelf'] as bool?;
+      absenceReason = app['absenceReason'] as String?;
       final br = app['activeBreak'];
       if (br is Map) {
         activeBreak = ActiveBreak(
@@ -284,6 +298,8 @@ class BarberRepository extends ChangeNotifier {
           for (final e in unfinishedFromPreviousDay) e.id: e.extrasJson(),
         },
         'absentToday': absentToday,
+        if (absenceRecordedBySelf != null) 'absenceRecordedBySelf': absenceRecordedBySelf,
+        if (absenceReason != null) 'absenceReason': absenceReason,
         if (activeBreak != null)
           'activeBreak': {
             'kind': activeBreak!.kind.toWire(),
@@ -313,7 +329,6 @@ class BarberRepository extends ChangeNotifier {
       final warnings = today.closingWarnings.toSet();
       walkInOnly = today.walkInOnly;
       noShiftToday = !today.hasShift;
-      if (today.day?.absentToday ?? false) absentToday = true;
       // استراحة مفتوحة على السيرفر (بدأها الحلاق من جهاز آخر أو قبل إعادة التشغيل).
       final open = today.openBreak;
       if (open != null && activeBreak == null) {
@@ -344,6 +359,7 @@ class BarberRepository extends ChangeNotifier {
       }
       // إعادة تطبيق ما لم يُرسل بعد فوق حالة السيرفر.
       final outbox = await engine.store.getOutbox();
+      _adoptAbsence(today, outbox.map((o) => o.event));
       for (final o in outbox) {
         fresh = applyEvent(fresh, o.event, services, _now(), breaks: breaks, walkInOnly: walkInOnly);
       }
@@ -359,7 +375,6 @@ class BarberRepository extends ChangeNotifier {
       }
       unfinishedFromPreviousDay = freshPrev;
       pending = outbox.length;
-      if (settings['absentToday'] == true) absentToday = true;
       loadError = null;
       if (link != LinkStatus.online) {
         link = LinkStatus.online;
@@ -385,6 +400,36 @@ class BarberRepository extends ChangeNotifier {
     }
   }
 
+  /// حالة الغياب من السيرفر، إلا إن كان في الصندوق إبلاغ أو تراجع لم يُرسل
+  /// بعد — فآخره هو الحالة المعروضة (واجهة متفائلة، تعمل دون اتصال).
+  void _adoptAbsence(sa.StaffToday today, Iterable<sa.DeviceEvent> outbox) {
+    sa.DeviceEvent? last;
+    for (final e in outbox) {
+      if (e.type == sa.DeviceEventType.absentToday ||
+          e.type == sa.DeviceEventType.absentCancelled) {
+        last = e;
+      }
+    }
+    if (last != null) {
+      absentToday = last.type == sa.DeviceEventType.absentToday;
+      if (absentToday) absenceRecordedBySelf = true;
+      return;
+    }
+    final day = today.day;
+    // بلا دوام اليوم (`day: null`) لا غياب يُعرض.
+    absentToday = day?.absentToday ?? false;
+    if (!absentToday) {
+      absenceRecordedBySelf = null;
+      absenceReason = null;
+      return;
+    }
+    final a = day!.absence;
+    if (a != null) {
+      absenceRecordedBySelf = a.recordedBySelf;
+      absenceReason = a.reason;
+    }
+  }
+
   // ---------------- إجراءات الحلاق (عبر الصندوق) ----------------
 
   Future<sa.DeviceEvent?> _record(
@@ -393,7 +438,10 @@ class BarberRepository extends ChangeNotifier {
     Map<String, dynamic> payload = const {},
   }) async {
     final engine = _engine;
-    if (engine == null) return null;
+    if (engine == null) {
+      // لا يُتجاهل الإجراء بصمت: التخزين المحلي غير متاح (loadError).
+      throw StateError(loadError ?? 'التطبيق لم يجهز بعد — أعد المحاولة بعد لحظات');
+    }
     final event = await engine.recordEvent(type, bookingId: bookingId, payload: payload);
     entries = applyEvent(entries, event, services, _now(), breaks: breaks, walkInOnly: walkInOnly);
     pending = await engine.outbox.pendingCount();
@@ -532,6 +580,10 @@ class BarberRepository extends ChangeNotifier {
   }
 
   Future<void> startBreak(sa.BreakKind kind) async {
+    // ق26: لا استراحة في يوم أبلغ فيه الحلاق أنه لن يعمل (يرفضها السيرفر أيضًا).
+    if (absentToday) {
+      throw StateError('أبلغت أنك لن تعمل اليوم — تراجع عن ذلك أولًا لتسجيل استراحة');
+    }
     activeBreak = ActiveBreak(kind, _now());
     await _record(sa.DeviceEventType.breakStarted, payload: {'kind': kind.toWire()});
   }
@@ -543,10 +595,48 @@ class BarberRepository extends ChangeNotifier {
     await _record(sa.DeviceEventType.breakEnded, payload: {'kind': b.kind.toWire()});
   }
 
-  /// ق26: «لن أعمل اليوم».
+  /// ق26: «لن أعمل اليوم» — تتغير الحالة فورًا (ولو دون اتصال) ويُرسل الحدث
+  /// عبر الصندوق. إن فشل التسجيل محليًا تعود الحالة كما كانت ويُرمى الخطأ.
   Future<void> reportAbsentToday(String reason) async {
+    final wasAbsent = absentToday;
+    final wasBySelf = absenceRecordedBySelf;
+    final wasReason = absenceReason;
     absentToday = true;
-    await _record(sa.DeviceEventType.absentToday, payload: {'reason': reason});
+    absenceRecordedBySelf = true;
+    absenceReason = reason.isEmpty ? null : reason;
+    _notify();
+    try {
+      await _record(sa.DeviceEventType.absentToday,
+          payload: {if (reason.isNotEmpty) 'reason': reason});
+    } catch (_) {
+      absentToday = wasAbsent;
+      absenceRecordedBySelf = wasBySelf;
+      absenceReason = wasReason;
+      _notify();
+      rethrow;
+    }
+  }
+
+  /// التراجع عن «لن أعمل اليوم» لليوم نفسه (المرحلة 11): يعود الحجز عند
+  /// الحلاق، وما نقله المدير من حجوزاته يبقى حيث هو. متفائل ويعمل دون اتصال.
+  Future<void> cancelAbsentToday() async {
+    if (!absentToday) return;
+    final wasAbsent = absentToday;
+    final wasBySelf = absenceRecordedBySelf;
+    final wasReason = absenceReason;
+    absentToday = false;
+    absenceRecordedBySelf = null;
+    absenceReason = null;
+    _notify();
+    try {
+      await _record(sa.DeviceEventType.absentCancelled);
+    } catch (_) {
+      absentToday = wasAbsent;
+      absenceRecordedBySelf = wasBySelf;
+      absenceReason = wasReason;
+      _notify();
+      rethrow;
+    }
   }
 
   // ---------------- متصل فقط ----------------
@@ -558,19 +648,32 @@ class BarberRepository extends ChangeNotifier {
     required List<String> serviceIds,
   }) async {
     final engine = _engine;
-    if (engine == null || link == LinkStatus.offline) {
+    if (link == LinkStatus.offline) {
       throw const sa.ApiError(
         code: 'OFFLINE_WALK_IN_REFUSED',
         message: 'لا يمكن إضافة زبون حاضر دون اتصال بالإنترنت.',
       );
     }
-    final booking =
-        await engine.createWalkIn(name: name, phone: phone, serviceIds: serviceIds);
+    // المحرك يرفض قبل أول نبضة ناجحة؛ الطابور متصل فعلًا (آخر تحديث نجح)،
+    // فنطلب من السيرفر مباشرة — وهو الحكم (متصل فقط، آخر الطابور).
+    final booking = (engine != null && engine.isOnline)
+        ? await engine.createWalkIn(name: name, phone: phone, serviceIds: serviceIds)
+        : await api.createWalkIn(name: name, phone: phone, serviceIds: serviceIds);
     final entry = QueueEntry.from(booking, services);
     entries = [...entries.where((e) => e.id != entry.id), entry];
     await _saveLocal();
     _notify();
     unawaited(refresh());
+  }
+
+  /// خدمات الصالون لشاشة «زبون حاضر»: إن لم تصل بعد (أول تشغيل، أو تعذّر
+  /// التخزين المحلي) تُطلب من السيرفر مباشرة. يرمي `ApiError` عند الفشل.
+  Future<void> ensureServices() async {
+    if (services.any((s) => s.active)) return;
+    final today = await api.getStaffToday();
+    services = today.services;
+    _notify();
+    if (_handle != null) await _saveLocal();
   }
 
   /// معاينة أثر تعديل الخدمة — متصل فقط (ق9، ق24).

@@ -66,6 +66,34 @@ class _QueuesScreenState extends ConsumerState<QueuesScreen> {
     }
   }
 
+  /// المرحلة 11: المدير يتراجع دائمًا عن «لن أعمل اليوم» لأي حلاق (ولنفسه).
+  Future<void> _undoAbsence(sa.ManagerBarberQueue barber) async {
+    final ok = await confirmDialog(
+      context,
+      title: 'إلغاء غياب ${barber.name}؟',
+      body: 'يعود يومه إلى وضعه الطبيعي ويُستأنف الحجز عنده من الآن. '
+          'الحجوزات التي نقلتها إلى حلاق آخر تبقى حيث هي ولا تعود تلقائيًا.',
+      confirm: 'إلغاء الغياب',
+    );
+    if (!ok || !mounted) return;
+    final api = ref.read(servicesProvider).api;
+    try {
+      final list = await api.getManagerAbsences();
+      final workDate = barber.day?.workDate;
+      final match = list.whereType<Map>().where(
+          (a) => a['staffId'] == barber.id && (workDate == null || a['workDate'] == workDate));
+      if (match.isEmpty) {
+        if (mounted) toast(context, 'لا غياب مسجّل له اليوم');
+      } else {
+        await api.deleteManagerAbsence(match.first['id'] as String);
+        if (mounted) toast(context, 'عاد ${barber.name} للعمل اليوم — استُؤنف الحجز عنده');
+      }
+    } catch (e) {
+      if (mounted) toast(context, 'تعذّر إلغاء الغياب: ${errorText(e)}');
+    }
+    await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
@@ -103,7 +131,7 @@ class _QueuesScreenState extends ConsumerState<QueuesScreen> {
                 title: 'لا حلاقين بعد',
                 body: 'أضف الطاقم من الإعدادات ← الطاقم.',
               ),
-            for (final b in barbers ?? const <sa.ManagerBarberQueue>[]) _BarberQueue(barber: b, onTransfer: _transfer),
+            for (final b in barbers ?? const <sa.ManagerBarberQueue>[]) _BarberQueue(barber: b, onTransfer: _transfer, onUndoAbsence: _undoAbsence),
           ]),
         ),
       ],
@@ -112,9 +140,10 @@ class _QueuesScreenState extends ConsumerState<QueuesScreen> {
 }
 
 class _BarberQueue extends StatelessWidget {
-  const _BarberQueue({required this.barber, required this.onTransfer});
+  const _BarberQueue({required this.barber, required this.onTransfer, required this.onUndoAbsence});
   final sa.ManagerBarberQueue barber;
   final void Function(sa.Booking booking, sa.ManagerBarberQueue from) onTransfer;
+  final void Function(sa.ManagerBarberQueue barber) onUndoAbsence;
 
   @override
   Widget build(BuildContext context) {
@@ -124,11 +153,21 @@ class _BarberQueue extends StatelessWidget {
       title: barber.name.isEmpty ? 'حلاق' : barber.name,
       trailing: barber.day == null ? const Muted('خارج الدوام') : DayStateBadge(state: state),
       children: [
-        if (state == sa.BarberDayState.absentToday && active.isNotEmpty)
-          const SaloniBanner(
+        if (state == sa.BarberDayState.absentToday)
+          SaloniBanner(
             tone: SaloniBannerTone.warning,
-            title: 'غائب اليوم',
-            body: 'انقل حجوزاته القائمة يدويًا إلى حلاق آخر — يُبلَّغ الزبائن تلقائيًا.',
+            title: 'لن يعمل اليوم — الحجز متوقف عنده',
+            body: active.isNotEmpty
+                ? 'انقل حجوزاته القائمة يدويًا إلى حلاق آخر — يُبلَّغ الزبائن تلقائيًا. '
+                    'وإن كان سيعمل فألغِ الغياب.'
+                : 'إن كان سيعمل اليوم فألغِ الغياب.',
+            action: SaloniButton(
+              key: Key('undo-absence-${barber.id}'),
+              label: 'إلغاء الغياب',
+              size: SaloniButtonSize.sm,
+              variant: SaloniButtonVariant.secondary,
+              onPressed: () => onUndoAbsence(barber),
+            ),
           ),
         if (state == sa.BarberDayState.disconnected)
           const SaloniBanner(

@@ -1,33 +1,26 @@
-/// تنسيق الأوقات والمبالغ والمدد بالعربية (design.md §10: اختيار نمط الأرقام).
+/// تنسيق الأوقات والمبالغ والمدد بالعربية — بأرقام غربية 0–9 دائمًا (ق41).
 library;
 
+import 'package:intl/intl.dart' show DateFormat;
 import 'package:saloni_api/saloni_api.dart' as sa;
-
-/// نمط الأرقام المعروض — يضبطه الإعداد «الأرقام العربية المشرقية».
-enum NumeralStyle { latin, eastern }
-
-/// الإعداد الحالي لنمط الأرقام (يُضبط من التفضيلات عند بدء التطبيق).
-NumeralStyle numeralStyle = NumeralStyle.latin;
 
 /// المنطقة الزمنية للصالون النشط — تُعرض بها كل الأوقات لا بتوقيت الجهاز
 /// (design.md §2، §10؛ I5). تُضبط عند الدخول/استرجاع الجلسة
 /// (`AuthController._adoptSession`/`bootstrap`/`refreshSessionInfo`).
 String salonTimezone = sa.defaultSalonTimezone;
 
-const _eastern = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+/// الأرقام دائمًا غربية 0–9 (ق41): أُلغي خيار «الأرقام العربية المشرقية».
+/// تُبقى هذه الدالة نقطة مرور واحدة لكل نص رقمي معروض، وتحوّل أي رقم مشرقي
+/// (مثلًا من إدخال قديم) إلى غربي.
+String digits(String s) => sa.toLatinDigits(s);
 
-/// يحوّل الأرقام اللاتينية في النص إلى المشرقية إن كان الإعداد مفعّلًا.
-String digits(String s) {
-  if (numeralStyle == NumeralStyle.latin) return s;
-  final b = StringBuffer();
-  for (final ch in s.runes) {
-    if (ch >= 0x30 && ch <= 0x39) {
-      b.write(_eastern[ch - 0x30]);
-    } else {
-      b.writeCharCode(ch);
-    }
+/// ق41: عناصر Material المترجمة (منتقي التاريخ، التواريخ المختصرة) تستخدم
+/// `DateFormat` من `intl`، وهو يعرض الأرقام المشرقية للغة `ar` افتراضيًا.
+/// يُستدعى مرة عند بدء التطبيق (`main`) قبل بناء أي واجهة.
+void useWesternDigitsEverywhere() {
+  for (final l in const ['ar', 'ar_SA', 'ar_EG', 'ar_JO', 'ar_PS', 'ar_AE', 'ar_KW', 'ar_QA', 'ar_BH', 'ar_OM']) {
+    DateFormat.useNativeDigitsByDefaultFor(l, false);
   }
-  return b.toString();
 }
 
 /// «10:05» بتوقيت الصالون (بلا لاحقة).
@@ -79,83 +72,35 @@ const List<(int, String)> weekdaysFromSaturday = [
   (DateTime.friday, 'الجمعة'),
 ];
 
-/// العملة: الرمز العربي ومنازل الوحدة الصغرى (api.md: المبالغ بأصغر وحدة).
-class Currency {
-  const Currency(this.code, this.symbol, this.minorDigits);
-  final String code;
-  final String symbol;
-  final int minorDigits;
-
-  static const _known = {
-    'SAR': Currency('SAR', 'ر.س', 2),
-    'AED': Currency('AED', 'د.إ', 2),
-    'QAR': Currency('QAR', 'ر.ق', 2),
-    'KWD': Currency('KWD', 'د.ك', 3),
-    'BHD': Currency('BHD', 'د.ب', 3),
-    'OMR': Currency('OMR', 'ر.ع', 3),
-    'JOD': Currency('JOD', 'د.أ', 3),
-    'EGP': Currency('EGP', 'ج.م', 2),
-    'USD': Currency('USD', r'$', 2),
-  };
-
-  static Currency of(String? code) =>
-      _known[code?.toUpperCase()] ?? Currency(code ?? 'SAR', code ?? 'ر.س', 2);
-
-  int get _factor => minorDigits == 3 ? 1000 : 100;
-
-  /// «60» أو «60.50» (بلا رمز).
-  String amount(int minor) {
-    final whole = minor ~/ _factor;
-    final frac = minor % _factor;
-    final w = _group(whole);
-    if (frac == 0) return digits(w);
-    return digits('$w.${frac.toString().padLeft(minorDigits, '0')}');
-  }
-
-  /// «60 ر.س».
-  String format(int minor) => '${amount(minor)} $symbol';
-
-  /// يحوّل نصًا مُدخلًا («60» أو «60.5») إلى الوحدة الصغرى.
-  int? parse(String text) {
-    final t = text.trim().replaceAll(',', '');
-    final v = double.tryParse(_toLatin(t));
-    if (v == null || v < 0) return null;
-    return (v * _factor).round();
-  }
-
-  static String _group(int n) {
-    final s = n.toString();
-    final b = StringBuffer();
-    for (var i = 0; i < s.length; i++) {
-      if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
-      b.write(s[i]);
-    }
-    return b.toString();
-  }
-}
-
-/// يحوّل الأرقام المشرقية المُدخلة إلى لاتينية.
-String _toLatin(String s) {
-  var out = s;
-  for (var i = 0; i < 10; i++) {
-    out = out.replaceAll(_eastern[i], '$i');
-  }
-  return out;
-}
+/// العملة (ق34، ق41) — التعريف المشترك في `saloni_api` (يشمل الشيكل ₪).
+typedef Currency = sa.SaloniCurrency;
 
 /// يحلل عددًا صحيحًا من إدخال المستخدم (يقبل الأرقام المشرقية).
-int? parseIntInput(String s) => int.tryParse(_toLatin(s.trim()));
+int? parseIntInput(String s) => int.tryParse(sa.toLatinDigits(s.trim()));
 
 /// «HH:mm» ← دقائق منذ منتصف الليل.
 String wireTime(int minutesOfDay) =>
     '${(minutesOfDay ~/ 60).toString().padLeft(2, '0')}:${(minutesOfDay % 60).toString().padLeft(2, '0')}';
 
-/// عرض «HH:mm» القادمة من السيرفر بصيغة «4:00 م».
+/// «4:00 م» من دقائق منذ منتصف الليل — **ساعة جدارية** كما هي (دوام،
+/// استراحة يومية، ساعة في تقرير): لا تحويل مناطق زمنية إطلاقًا.
+///
+/// إصلاح ملاحظة التجربة الأولى: كانت `displayWireTime` تبني `DateTime` بتوقيت
+/// **الجهاز** ثم تحوّله لتوقيت الصالون عبر [timeAr]، فإذا اختلف توقيت الهاتف عن
+/// توقيت الصالون بساعة (مثل هاتف بتوقيت فلسطين وصالون افتراضي بتوقيت الرياض)
+/// ظهرت الساعة 9 المختارة «10» في كل مكان يعرض ساعات العمل.
+String wallTimeAr(int minutesOfDay) {
+  final m = minutesOfDay % 1440;
+  final h24 = m ~/ 60;
+  final h = h24 % 12 == 0 ? 12 : h24 % 12;
+  return '$h:${(m % 60).toString().padLeft(2, '0')} ${h24 < 12 ? 'ص' : 'م'}';
+}
+
+/// عرض «HH:mm» القادمة من السيرفر بصيغة «4:00 م» (ساعة جدارية، انظر [wallTimeAr]).
 String displayWireTime(String? hhmmWire) {
   if (hhmmWire == null || hhmmWire.isEmpty) return '—';
-  final parts = hhmmWire.split(':');
+  final parts = sa.toLatinDigits(hhmmWire).split(':');
   final h = int.tryParse(parts[0]) ?? 0;
   final m = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
-  final d = DateTime(2000, 1, 1, h, m);
-  return timeAr(d);
+  return wallTimeAr(h * 60 + m);
 }

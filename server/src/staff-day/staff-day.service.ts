@@ -121,6 +121,18 @@ export class StaffDayService {
     const queue = await bookingDtos(t.db, ctx.rows, new Map(slots.map((s) => [s.bookingId, s])), { includePhone: true });
     const breaks = await this.breakList(t.db, t.salon.timezone, me.subjectId, shift);
     const serveLate = new Set(ctx.rows.filter((r) => r.serve_late).map((r) => r.id));
+    // Phase 11 trial: who reported today's absence, and may this account undo it (absent_cancelled)?
+    const { rows: abs } = await t.db.query<{ reason: string | null; recorded_by_staff_id: string | null }>(
+      'SELECT reason, recorded_by_staff_id FROM absences WHERE staff_id = $1 AND work_date = $2',
+      [me.subjectId, shift.workDate],
+    );
+    const absence = abs[0]
+      ? {
+          reason: abs[0].reason,
+          recordedBy: abs[0].recorded_by_staff_id === me.subjectId ? ('self' as const) : ('manager' as const),
+          canUndo: me.role === 'manager' || abs[0].recorded_by_staff_id === me.subjectId,
+        }
+      : null;
     return {
       day: {
         workDate: shift.workDate,
@@ -128,6 +140,7 @@ export class StaffDayService {
         workEnd: iso(shift.workEnd),
         state: stateWire(ctx.state),
         firstConnectedAt: iso(ctx.dayRow?.first_connected_at),
+        absence,
       },
       queue,
       breaks: breaks.filter((b) => b.kind !== 'walk_in_only').map(({ id, kind, start, end, open }) => ({ id, kind, start, end, open })),

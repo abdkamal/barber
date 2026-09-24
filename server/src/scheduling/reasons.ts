@@ -26,6 +26,7 @@ export const REASONS = {
   transferred_ahead: 'نُقل حجز زبون قبلك إلى حلاق آخر',
   day_closed: 'انتهى يوم العمل',
   barber_absent: 'الحلاق لن يعمل اليوم',
+  barber_returned: 'عاد الحلاق للعمل اليوم',
   schedule_changed: 'عدّل المدير استراحات الحلاق',
 } as const;
 

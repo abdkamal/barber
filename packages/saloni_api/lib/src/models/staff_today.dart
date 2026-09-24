@@ -59,7 +59,33 @@ class TimeWindow {
       {'id': id, 'start': toIso(start), 'end': toIso(end)};
 }
 
-/// يوم عمل حلاق: `{workDate, workStart, workEnd, state, firstConnectedAt}`.
+/// غياب اليوم («لن أعمل اليوم»، ق26) كما يرسله `GET /staff/today` في
+/// `day.absence`: من سجّله، وهل يستطيع هذا الحساب التراجع عنه (المرحلة 11).
+class StaffAbsence {
+  const StaffAbsence({this.reason, required this.recordedBySelf, required this.canUndo});
+
+  final String? reason;
+
+  /// سجّله صاحب الحساب نفسه (`recordedBy: self`) لا المدير.
+  final bool recordedBySelf;
+
+  /// المدير يستطيع دائمًا؛ الحلاق فقط لغياب سجّله بنفسه.
+  final bool canUndo;
+
+  factory StaffAbsence.fromJson(Map<String, dynamic> json) => StaffAbsence(
+        reason: json['reason'] as String?,
+        recordedBySelf: json['recordedBy'] == 'self',
+        canUndo: json['canUndo'] == true,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'reason': reason,
+        'recordedBy': recordedBySelf ? 'self' : 'manager',
+        'canUndo': canUndo,
+      };
+}
+
+/// يوم عمل حلاق: `{workDate, workStart, workEnd, state, firstConnectedAt, absence?}`.
 class StaffDay {
   const StaffDay({
     required this.workDate,
@@ -67,6 +93,7 @@ class StaffDay {
     required this.workEnd,
     required this.state,
     this.firstConnectedAt,
+    this.absence,
   });
 
   final String workDate;
@@ -74,6 +101,9 @@ class StaffDay {
   final DateTime workEnd;
   final BarberDayState state;
   final DateTime? firstConnectedAt;
+
+  /// تفاصيل الغياب إن كان الحلاق غائبًا اليوم (سيرفر أقدم لا يرسلها: `null`).
+  final StaffAbsence? absence;
 
   bool get absentToday => state == BarberDayState.absentToday;
 
@@ -83,6 +113,7 @@ class StaffDay {
         workEnd: parseUtc(json['workEnd'] as String),
         state: BarberDayState.fromWire(json['state'] as String),
         firstConnectedAt: parseUtcOrNull(json['firstConnectedAt'] as String?),
+        absence: json['absence'] is Map ? StaffAbsence.fromJson(asMap(json['absence'])) : null,
       );
 
   Map<String, dynamic> toJson() => {
@@ -91,6 +122,7 @@ class StaffDay {
         'workEnd': toIso(workEnd),
         'state': state.toWire(),
         'firstConnectedAt': toIsoOrNull(firstConnectedAt),
+        if (absence != null) 'absence': absence!.toJson(),
       };
 }
 

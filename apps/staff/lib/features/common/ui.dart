@@ -205,11 +205,25 @@ class SurfaceCard extends StatelessWidget {
 
 /// صف مفتاح/قيمة (صفوف الإعدادات في M-Settings).
 class ValueRow extends StatelessWidget {
-  const ValueRow({super.key, required this.label, required this.value, this.onTap, this.first = false});
+  const ValueRow({
+    super.key,
+    required this.label,
+    required this.value,
+    this.onTap,
+    this.first = false,
+    this.help,
+    this.helper,
+  });
   final String label;
   final String value;
   final VoidCallback? onTap;
   final bool first;
+
+  /// شرح الخيار (ⓘ بجانب العنوان يفتح ورقة الشرح).
+  final SaloniHelp? help;
+
+  /// سطر مساعد قصير تحت العنوان.
+  final String? helper;
 
   @override
   Widget build(BuildContext context) {
@@ -226,7 +240,23 @@ class ValueRow extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Expanded(child: Text(label, style: SaloniTextStyles.body.copyWith(color: c.ink))),
+              Expanded(
+                child: help == null && helper == null
+                    ? Text(label, style: SaloniTextStyles.body.copyWith(color: c.ink))
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SaloniLabelWithHelp(
+                            label: label,
+                            help: help,
+                            style: SaloniTextStyles.body.copyWith(color: c.ink),
+                          ),
+                          if (helper != null)
+                            Text(helper!, style: SaloniTextStyles.caption.copyWith(color: c.inkMuted)),
+                        ],
+                      ),
+              ),
               const SizedBox(width: SaloniSpacing.space2),
               Flexible(
                 child: Text(

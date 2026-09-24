@@ -186,6 +186,7 @@ List<QueueEntry> applyEvent(
     case sa.DeviceEventType.breakStarted:
     case sa.DeviceEventType.breakEnded:
     case sa.DeviceEventType.absentToday:
+    case sa.DeviceEventType.absentCancelled:
       return all;
   }
 }
