@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:saloni_api/saloni_api.dart' as sa;
 import 'package:saloni_api/staff_sync.dart';
 
-import '../core/compat_http_client.dart';
 import '../core/format.dart';
 import '../core/platform/device_services.dart';
 import '../core/platform/storage.dart';
@@ -27,7 +26,6 @@ class ActiveBreak {
 class BarberRepository extends ChangeNotifier {
   BarberRepository({
     required this.api,
-    required this.compat,
     required Future<LocalStoreHandle> Function() openStore,
     required this.device,
     this.currency = const Currency('SAR', 'ر.س', 2),
@@ -37,7 +35,6 @@ class BarberRepository extends ChangeNotifier {
         _now = clock ?? DateTime.now;
 
   final sa.ApiClient api;
-  final CompatHttpClient compat;
   final DeviceServices device;
   final Currency currency;
   final Duration heartbeat;
@@ -47,7 +44,6 @@ class BarberRepository extends ChangeNotifier {
   LocalStoreHandle? _handle;
   StaffSyncEngine? _engine;
   StreamSubscription<ConnectionState>? _sub;
-  DateTime? _engineInitialSince;
   bool _disposed = false;
   bool _refreshing = false;
 
@@ -59,7 +55,7 @@ class BarberRepository extends ChangeNotifier {
   List<sa.BreakPeriod> breaks = const [];
 
   /// فترات «حاضرون فقط» اليوم (ق33): لا حجوزات تطبيق، للزبائن الحاضرين فقط.
-  List<({DateTime start, DateTime end})> walkInOnly = const [];
+  List<sa.TimeWindow> walkInOnly = const [];
   Map<String, dynamic> settings = const {};
   ActiveBreak? activeBreak;
   bool absentToday = false;
@@ -130,7 +126,6 @@ class BarberRepository extends ChangeNotifier {
       onChanges: (_) => unawaited(refresh()),
     );
     _engine = engine;
-    _engineInitialSince = engine.state.since;
     _sub = engine.connectionState.listen(_onConnection);
     ready = true;
     _notify();
@@ -164,30 +159,18 @@ class BarberRepository extends ChangeNotifier {
     unawaited(device.updateKeepAlive(title: 'صالوني — الطاقم', text: t));
   }
 
-  ConnectionState? _lastEngineState;
-
+  /// يعكس حالة المحرك على الشريط. المحرك لا يبث حالة مكررة، و`since` ثابت
+  /// ما دامت الحالة المستقرة لم تتغير، و«مزامنة» لا تظهر إلا أثناء إرسال أحداث.
   void _onConnection(ConnectionState s) {
     pending = s.pendingCount;
-    final prev = _lastEngineState;
-    _lastEngineState = s;
-    // المحرك يعيد بث آخر حالة (بنفس `since`) عند تغيّر عدد المعلّق فقط؛
-    // ليست نتيجة اتصال جديدة، فلا نغيّر حالة الشريط.
-    if (prev != null && prev.since == s.since && prev.status == s.status) {
-      _updateKeepAlive();
-      _notify();
-      return;
-    }
     switch (s.status) {
       case ConnectionStatus.syncing:
-        // النبضة الدورية تمر بحالة «مزامنة» كل 30 ث؛ لا نغيّر الشريط إلا إن
-        // كانت هناك إجراءات فعلية بانتظار الإرسال.
-        if (pending > 0 && link != LinkStatus.offline) link = LinkStatus.syncing;
+        if (link != LinkStatus.offline) link = LinkStatus.syncing;
       case ConnectionStatus.offline:
-        // الحالة الابتدائية للمحرك (قبل أول نبضة) ليست انقطاعًا فعليًا.
-        if (s.since == _engineInitialSince) break;
-        if (link != LinkStatus.offline) {
+        // الحالة الابتدائية للمحرك (قبل أول محاولة) ليست انقطاعًا فعليًا.
+        if (_engine?.hasAttempted ?? false) {
           link = LinkStatus.offline;
-          offlineSince ??= s.since;
+          offlineSince = s.since;
         }
       case ConnectionStatus.online:
         final wasOffline = link == LinkStatus.offline;
@@ -237,7 +220,8 @@ class BarberRepository extends ChangeNotifier {
       final queue = await store.getQueue();
       entries = [
         for (final b in queue)
-          QueueEntry.from(b, (details[b.id] as Map?)?.cast<String, dynamic>(), services),
+          QueueEntry.from(b, services,
+              local: (details[b.id] as Map?)?.cast<String, dynamic>()),
       ];
       absentToday = app['absentToday'] == true;
       final br = app['activeBreak'];
@@ -282,54 +266,32 @@ class BarberRepository extends ChangeNotifier {
     _refreshing = true;
     try {
       // تحديث يدوي أو بعد عودة الاتصال: أرسل كل المعلّق الآن متجاوزًا مهلة
-      // التراجع الأُسّي (لا يوفر `Outbox` خيار «إرسال فوري»).
-      for (final o in await engine.store.getOutbox()) {
-        if (o.nextRetryAt != null) {
-          await engine.store.putOutboxEntry(OutboxEntry(event: o.event, attempts: o.attempts));
-        }
-      }
-      await engine.outbox.flush();
+      // التراجع الأُسّي.
+      await engine.outbox.flush(force: true);
       final today = await api.getStaffToday();
-      final raw = compat.lastRaw('/staff/today');
-      final rawQueue = raw is Map && raw['queue'] is List ? raw['queue'] as List : const [];
-      final rawById = <String, Map<String, dynamic>>{
-        for (final r in rawQueue)
-          if (r is Map && r['id'] != null) r['id'].toString(): Map<String, dynamic>.from(r),
-      };
       // ق24: حجوزات متوقعة بعد الإغلاق وتنتظر قرار الحلاق.
-      final warnings = raw is Map && raw['closingWarnings'] is List ? raw['closingWarnings'] as List : const [];
-      for (final id in warnings) {
-        rawById[id.toString()]?['pastClosing'] = true;
-      }
-      final wio = raw is Map && raw['walkInOnly'] is List ? raw['walkInOnly'] as List : const [];
-      walkInOnly = [
-        for (final w in wio.whereType<Map>())
-          if (DateTime.tryParse('${w['start']}') != null && DateTime.tryParse('${w['end']}') != null)
-            (start: DateTime.parse('${w['start']}'), end: DateTime.parse('${w['end']}')),
-      ];
-      final day = raw is Map ? raw['day'] : null;
-      noShiftToday = raw is Map && raw.containsKey('day') && day == null;
-      if (day is Map && day['state'] == 'absent_today') absentToday = true;
+      final warnings = today.closingWarnings.toSet();
+      walkInOnly = today.walkInOnly;
+      noShiftToday = !today.hasShift;
+      if (today.day?.absentToday ?? false) absentToday = true;
       // استراحة مفتوحة على السيرفر (بدأها الحلاق من جهاز آخر أو قبل إعادة التشغيل).
-      final rawBreaks = raw is Map && raw['breaks'] is List ? raw['breaks'] as List : const [];
-      final open = rawBreaks.whereType<Map>().where((b) => b['open'] == true).firstOrNull;
+      final open = today.openBreak;
       if (open != null && activeBreak == null) {
-        try {
-          activeBreak = ActiveBreak(
-            sa.BreakKind.fromWire(open['kind'].toString()),
-            DateTime.parse(open['start'].toString()),
-          );
-        } catch (_) {}
+        activeBreak = ActiveBreak(open.kind, open.start);
       } else if (open == null && activeBreak != null) {
         final pendingBreak = (await engine.store.getOutbox())
             .any((o) => o.event.type == sa.DeviceEventType.breakStarted);
         if (!pendingBreak) activeBreak = null;
       }
+      // حالة محلية لا يرسلها السيرفر (قرار الإغلاق، الدفع المؤكد محليًا).
+      final localById = {for (final e in entries) e.id: e.extrasJson()};
       services = today.services;
       breaks = today.breaks;
       settings = today.settings;
       var fresh = [
-        for (final b in today.queue) QueueEntry.from(b, rawById[b.id], services),
+        for (final b in today.queue)
+          QueueEntry.from(b, services,
+              local: localById[b.id], pastClosing: warnings.contains(b.id)),
       ];
       // إبقاء المنجز محليًا (للدفعات) إن لم يعد السيرفر يرسله.
       for (final e in entries) {
@@ -394,8 +356,10 @@ class BarberRepository extends ChangeNotifier {
 
   Future<void> _flushSoon() async {
     final engine = _engine;
-    if (engine == null) return;
-    final r = await engine.outbox.flush();
+    if (engine == null || _disposed) return;
+    // إرسال فوري (يتجاوز التراجع) ثم نبضة وسحب — المحرك يحدّث الشريط والعدد.
+    final r = await engine.flushNow();
+    if (_disposed) return;
     pending = r.remaining;
     _notify();
   }
@@ -478,24 +442,9 @@ class BarberRepository extends ChangeNotifier {
         message: 'لا يمكن إضافة زبون حاضر دون اتصال بالإنترنت.',
       );
     }
-    sa.Booking booking;
-    try {
-      booking = await engine.createWalkIn(name: name, phone: phone, serviceIds: serviceIds);
-    } on sa.ApiError catch (e) {
-      // المحرك يمر بحالة «مزامنة» أثناء النبضة؛ نرسل مباشرة إن كنا متصلين.
-      if (e.code != 'OFFLINE_WALK_IN_REFUSED' || link != LinkStatus.online) rethrow;
-      booking = await api.createWalkIn(name: name, phone: phone, serviceIds: serviceIds);
-    }
-    final raw = compat.lastRaw('/staff/walk-ins');
-    final entry = QueueEntry.from(
-      booking,
-      {
-        'customerName': name,
-        'customerPhone': phone,
-        if (raw is Map) ...raw.cast<String, dynamic>(),
-      },
-      services,
-    );
+    final booking =
+        await engine.createWalkIn(name: name, phone: phone, serviceIds: serviceIds);
+    final entry = QueueEntry.from(booking, services);
     entries = [...entries.where((e) => e.id != entry.id), entry];
     await _saveLocal();
     _notify();
@@ -504,8 +453,8 @@ class BarberRepository extends ChangeNotifier {
 
   /// معاينة أثر تعديل الخدمة — متصل فقط (ق9، ق24).
   Future<ImpactPreview> previewImpact(String bookingId, List<String> serviceIds) async {
-    final json = await api.getStaffImpact(bookingId: bookingId, serviceIds: serviceIds);
-    return ImpactPreview.fromJson(json);
+    final impact = await api.getStaffImpact(bookingId: bookingId, serviceIds: serviceIds);
+    return ImpactPreview.fromImpact(impact);
   }
 
   /// الوقت المتوقع التقريبي لزبون حاضر جديد (آخر الطابور).
@@ -525,26 +474,17 @@ class BarberRepository extends ChangeNotifier {
   Future<void> loadPayments() async {
     try {
       final list = await api.getStaffPayments();
-      final raw = compat.lastRaw('/staff/payments');
-      final rawList = raw is List ? raw : const [];
-      final rawById = <String, Map>{
-        for (final r in rawList)
-          if (r is Map && r['bookingId'] != null) r['bookingId'].toString(): r,
-      };
       serverPayments = [
         for (final p in list)
           PaymentView(
             bookingId: p.bookingId,
-            name: (rawById[p.bookingId]?['customerName'] ??
-                    entries.where((e) => e.id == p.bookingId).firstOrNull?.name ??
-                    'زبون')
-                .toString(),
-            services: (rawById[p.bookingId]?['services'] ??
-                    _servicesOf(p.bookingId))
-                .toString(),
+            name: p.customerName ??
+                entries.where((e) => e.id == p.bookingId).firstOrNull?.name ??
+                'زبون',
+            services: _servicesOf(p.bookingId),
             amountCents: p.amountCents,
             status: p.status,
-            at: DateTime.tryParse('${rawById[p.bookingId]?['finishedAt'] ?? ''}') ??
+            at: p.finishedAt ??
                 entries.where((e) => e.id == p.bookingId).firstOrNull?.actualEnd ??
                 p.confirmedAt,
           ),

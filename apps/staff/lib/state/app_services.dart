@@ -3,14 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:saloni_api/saloni_api.dart' as sa;
 
-import '../core/compat_http_client.dart';
 import '../core/config.dart';
 import '../core/format.dart';
 import '../core/platform/device_services.dart';
 import '../core/platform/push.dart';
 import '../core/platform/storage.dart';
 import '../core/prefs.dart';
-import '../core/raw_api.dart';
 import '../data/barber_repository.dart';
 import '../data/models.dart';
 
@@ -18,8 +16,6 @@ import '../data/models.dart';
 class AppServices {
   AppServices({
     required this.api,
-    required this.compat,
-    required this.raw,
     required this.storage,
     required this.device,
     required this.push,
@@ -28,8 +24,6 @@ class AppServices {
   });
 
   final sa.ApiClient api;
-  final CompatHttpClient compat;
-  final RawApi raw;
   final StoragePlatform storage;
   final DeviceServices device;
   final PushService push;
@@ -58,16 +52,13 @@ class AppServices {
     required AppPrefs prefs,
     Duration heartbeat = AppConfig.heartbeat,
   }) {
-    final compat = CompatHttpClient(inner);
     final api = sa.ApiClient(
       baseUrl: baseUrl,
       tokenStore: storage.createTokenStore(),
-      httpClient: compat,
+      httpClient: inner,
     );
     return AppServices(
       api: api,
-      compat: compat,
-      raw: RawApi(api: api, http_: compat, baseUrl: baseUrl),
       storage: storage,
       device: device,
       push: push,
@@ -90,7 +81,6 @@ enum AuthStatus { unknown, signedOut, signedIn }
 /// حالة الدخول والجلسة (ق17، ق18).
 class AuthController extends ChangeNotifier {
   AuthController(this.services) {
-    services.compat.onSessionMeta = _onMeta;
     services.api.onSignedOut.listen((_) => _forcedSignOut());
   }
 
@@ -106,14 +96,14 @@ class AuthController extends ChangeNotifier {
   bool get isManager => role == sa.UserRole.manager;
   Currency get currency => Currency.of(salon?.currency);
 
-  void _onMeta(Map<String, dynamic>? salonJson, Map<String, dynamic>? account) {
-    if (salonJson != null) {
-      salon = SalonMeta.fromJson(salonJson);
-      services.prefs.setSalon(salon);
-    }
-    if (account != null && account['name'] != null) {
-      accountName = account['name'].toString();
-      services.prefs.setAccountName(accountName);
+  /// يحفظ بيانات الصالون والحساب القادمة مع الجلسة (دخول/تسجيل).
+  Future<void> _adoptSession(sa.Session session) async {
+    salon = SalonMeta.fromInfo(session.salon);
+    await services.prefs.setSalon(salon);
+    final name = session.account?.name;
+    if (name != null) {
+      accountName = name;
+      await services.prefs.setAccountName(name);
     }
   }
 
@@ -122,7 +112,9 @@ class AuthController extends ChangeNotifier {
       final s = await services.api.restoreSession();
       if (s != null && s.role != sa.UserRole.customer) {
         role = s.role;
-        salon = services.prefs.salon ?? SalonMeta(code: s.salonCode);
+        salon = s.salon.name != null
+            ? SalonMeta.fromInfo(s.salon)
+            : (services.prefs.salon ?? SalonMeta(code: s.salonCode));
         accountName = services.prefs.accountName;
         status = AuthStatus.signedIn;
         sessionKey++;
@@ -159,8 +151,8 @@ class AuthController extends ChangeNotifier {
     }
     await _adoptOwner('${session.salonCode}|$user');
     await services.prefs.rememberLogin(code, user);
+    await _adoptSession(session);
     role = session.role;
-    salon ??= SalonMeta(code: session.salonCode);
     status = AuthStatus.signedIn;
     sessionKey++;
     notifyListeners();
@@ -169,13 +161,13 @@ class AuthController extends ChangeNotifier {
   /// يحدّث بيانات الصالون (مثل انتهاء «بانتظار التفعيل») من `GET /auth/session`.
   Future<void> refreshSessionInfo() async {
     try {
-      final r = await services.raw.send('GET', '/auth/session');
-      if (r is Map && r['salon'] is Map) {
-        salon = SalonMeta.fromJson(Map<String, dynamic>.from(r['salon'] as Map));
-        await services.prefs.setSalon(salon);
-        notifyListeners();
-      }
-    } catch (_) {}
+      final info = await services.api.getSessionInfo();
+      salon = SalonMeta.fromInfo(info.salon);
+      await services.prefs.setSalon(salon);
+      notifyListeners();
+    } on sa.ApiError catch (_) {
+      // دون اتصال: تبقى البيانات المعروفة.
+    }
   }
 
   /// ق37: تسجيل صالون جديد — يعيد رمز الصالون. المالك يدخل كمدير مباشرة.
@@ -183,19 +175,15 @@ class AuthController extends ChangeNotifier {
     required Map<String, dynamic> salonData,
     required Map<String, dynamic> owner,
   }) async {
-    final json = await services.api.registerSalon({'salon': salonData, 'owner': owner});
-    final sessionJson = json['session'];
-    final salonJson = json['salon'];
-    final code = salonJson is Map ? salonJson['code'].toString() : '';
-    if (sessionJson is Map<String, dynamic>) {
-      final session = sa.Session.fromJson(sessionJson);
-      await services.api.setSession(session, rememberMe: true);
-      await _adoptOwner('${session.salonCode}|${owner['username']}');
-      await services.prefs.rememberLogin(session.salonCode, owner['username'].toString());
-      role = session.role;
-      salon ??= SalonMeta(code: session.salonCode, status: 'pending_activation');
-    }
-    return code;
+    final reg = await services.api.registerSalon(salon: salonData, owner: owner);
+    final session = reg.session;
+    await _adoptOwner('${session.salonCode}|${owner['username']}');
+    await services.prefs.rememberLogin(session.salonCode, owner['username'].toString());
+    await _adoptSession(session);
+    salon = SalonMeta.fromInfo(reg.salon);
+    await services.prefs.setSalon(salon);
+    role = session.role;
+    return reg.salon.code;
   }
 
   /// بعد شاشة «بانتظار التفعيل»: الانتقال إلى التطبيق بالجلسة الجديدة.
@@ -253,7 +241,6 @@ final barberRepoProvider = ChangeNotifierProvider<BarberRepository>((ref) {
   final auth = ref.read(authProvider);
   final repo = BarberRepository(
     api: services.api,
-    compat: services.compat,
     openStore: services.storage.openLocalStore,
     device: services.device,
     currency: auth.currency,

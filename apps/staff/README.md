@@ -65,7 +65,7 @@ flutter build web --no-web-resources-cdn
 lib/
   main.dart / app.dart          تهيئة، الثيم، RTL، الموجّه وحراسة الأدوار (/m/* للمدير فقط)
   core/                         config، تنسيق عربي (أرقام مشرقية اختيارية، عملة، أوقات)، تفضيلات،
-                                CompatHttpClient، RawApi، platform/ (تخزين، خدمة أمامية، FCM)
+                                platform/ (تخزين، خدمة أمامية، FCM)
   data/                         نماذج العرض، منطق الطابور المحلي، BarberRepository (فوق StaffSyncEngine)
   state/app_services.dart       الخدمات، AuthController، مزوّدات Riverpod
   features/
@@ -76,15 +76,23 @@ lib/
     manager/                    الطوابير + النقل، التقارير، ملف الصالون + الصور + الكتالوج + الخدمات،
                                 الإعدادات + QR، الطاقم، الزبائن، الدوام/الاستراحات/الإجازات
     common/                     هياكل التنقل، شريط الاتصال، الجولة التعريفية، عناصر تخطيط
-test/                           اختبارات فوق سيرفر وهمي (MockClient) عبر ApiClient الحقيقي
-assets/fonts/                   نسخة من خطوط saloni_ui (انظر «تغييرات مطلوبة في الحزم»)
+test/                           اختبارات فوق سيرفر وهمي (MockClient) بأشكال استجابة السيرفر الفعلية،
+                                عبر ApiClient الحقيقي
 ```
+
+كل الاتصال بالسيرفر عبر `ApiClient` و`StaffSyncEngine` من `saloni_api` مباشرة، بنماذجه المطابقة
+للسيرفر (`StaffToday`، `Booking`، `StaffImpact`، `Payment`، `ManagerQueues`، `PhoneDispute`…)؛ لا
+أغلفة توافق ولا طلبات خام داخل التطبيق. الخطوط وتراخيصها من `saloni_ui` (`registerSaloniFontLicenses()`
+في `main`). الاختبار الشامل على السيرفر الحقيقي: `e2e/run.sh`.
 
 ## العمل دون اتصال (design §6)
 
 - كل إجراء للحلاق (بدء، إنهاء، تعديل الخدمة، تأجيل، انتظار، لم يحضر، قرار الإغلاق، تأكيد الدفع،
   الاستراحات، «لن أعمل اليوم») يُسجَّل حدثًا في صندوق `StaffSyncEngine` ويُطبَّق محليًا فورًا
-  (`data/queue_logic.dart`)؛ الواجهة لا تنتظر الشبكة أبدًا.
+  (`data/queue_logic.dart`)؛ الواجهة لا تنتظر الشبكة أبدًا. إن كان متصلًا يُرسل فورًا في الخلفية
+  (`engine.flushNow()`)، و«تحديث» أو عودة الشبكة يرسلان المعلّق متجاوزين التراجع الأُسّي.
+- شريط الاتصال يعكس حالة المحرك مباشرة (لا تكرار، `since` ثابت أثناء الانقطاع، «مزامنة» فقط أثناء
+  إرسال أحداث).
 - عند كل تحديث من السيرفر يُعاد تطبيق الأحداث غير المرسلة فوق حالته.
 - إضافة زبون حاضر ومعاينة الأثر «متصل فقط» (معطّلة برسالة واضحة دون اتصال). تعديل الخدمة نفسه يُقبل
   دون اتصال (ق9).
@@ -92,24 +100,11 @@ assets/fonts/                   نسخة من خطوط saloni_ui (انظر «ت�
   الخروج يمسح القاعدة وملفها ومفتاحها ويوقف الخدمة الأمامية. انتهاء الجلسة القسري لا يمسح الأحداث غير
   المرسلة؛ تُمسح إن دخل حساب آخر على الجهاز.
 
-## تغييرات مطلوبة في الحزم (لم تُعدَّل — حلول مؤقتة داخل التطبيق)
-
-| الحزمة | المشكلة | الحل المؤقت هنا |
-|---|---|---|
-| saloni_api | `Session.fromJson` يتوقع `salon` نصًا، والسيرفر يعيده كائنًا `{code,name,status,timezone,currency}` (+ `account`) — يفشل الدخول والتجديد | `CompatHttpClient` يحوّله إلى الرمز ويحتفظ بالكائن |
-| saloni_api | `Booking` لا يحمل `customerName`/`customerPhone`/`eta`/`estimatedDurationMin`/`priceCents`/`calledAt`/`serveLate` التي يرسلها السيرفر؛ و`StaffToday` يُسقط `day`/`walkInOnly`/`closingWarnings` | `CompatHttpClient` يحتفظ بآخر JSON خام لـ `/staff/today` وغيرها |
-| saloni_api | رفع الصور multipart (`/manager/photos`، `/manager/profile/logo`، `/manager/catalog/{id}/photo`) بينما `addManagerPhoto` يرسل JSON؛ `PUT /manager/schedules` بينما العميل يرسل POST؛ لا حذف للدوام/الاستراحات/الإجازات؛ لا `GET /manager/phone-disputes` | `core/raw_api.dart` |
-| saloni_api | `StaffSyncEngine`: يعيد بث آخر حالة عند تغيّر عدد المعلّق (فتبدو كنتيجة اتصال)؛ `since` يتجدد مع كل نبضة فاشلة؛ لا «إرسال فوري» يتجاوز التراجع الأُسّي؛ النبضة تستهلك رقم تسلسل جهاز؛ لا تحديث للطابور المحلي من التغييرات (onChanges فقط) | معالجة في `BarberRepository` |
-| saloni_api | فشل شبكة أثناء تجديد الجلسة بعد 401 يُعامل كخروج (`onSignedOut`) | لا حل؛ يُراجع |
-| saloni_ui | الخطوط مسجّلة باسم `packages/saloni_ui/…` بينما الأنماط تطلب الاسم المجرد، فلا تُطبَّق في أي تطبيق | نسخة الخطوط (مع تراخيص OFL) في `assets/fonts` مسجّلة بالاسم المجرد. الحل الصحيح: `package: 'saloni_ui'` في الأنماط |
-| saloni_ui | `SaloniTextField` بلا `enabled`/`maxLines`/`keyboardType` مخصص؛ لا عنصر اختيار قائمة | عناصر بسيطة من الرموز نفسها |
-
 ## افتراضات (العقد لا يحسمها)
 
-- أشكال `/manager/queues` و`POST /manager/bookings/{id}/transfer` غير منفذة في السيرفر بعد؛ القراءة
-  متسامحة (`barberId|barber.id`، `queue|bookings` بحقول BookingDto).
 - ساعات الصالون في التسجيل = دوام افتراضي لكل يوم (`staffId: null`) عبر `PUT /manager/schedules`.
-- السيرفر لا يعيد صور الصالون في `GET /manager/profile`؛ تُعرض الصور المرفوعة في الجلسة الحالية فقط.
-- صور الوسائط تُعرض من `/v1/media/{code}/{file}` (للصالونات المفعّلة فقط).
+- النقل (ق25): عند `409 TRANSFER_NO_SLOT` تعرض ورقة النقل البدائل التي يعيدها السيرفر.
+- صور الوسائط تُعرض من `/v1/media/{code}/{file}` (للصالونات المفعّلة فقط)؛ صور الكتالوج يعيدها
+  السيرفر مسارًا مخزّنًا فتُحوَّل إلى الرابط نفسه.
 - «الأرقام العربية المشرقية» تفضيل عرض على الجهاز.
 - التوقيت المعروض بتوقيت الجهاز (جهاز الحلاق في الصالون).

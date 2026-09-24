@@ -47,12 +47,9 @@ class SessionState {
 /// المتحكم المركزي بجلسة الزبون: الصالونات المحفوظة على الجهاز، الصالون
 /// الفعّال، وعميل الواجهة البرمجية المرتبط به (ق7).
 ///
-/// **ملاحظة صدق:** كشف حالة «بانتظار الاعتماد» يعتمد على أن يعيد السيرفر خطأ
-/// برمز `ACCOUNT_PENDING` عند استدعاء نقاط الزبون المحمية لحساب لم يُعتمد
-/// بعد؛ هذا الرمز غير موثّق حرفيًا في `docs/api.md` (أقرب ما وثّقه القسم هو
-/// نص "حساب ينتظر الاعتماد" في التنبيهات §8). اعتُمد كأقرب قراءة آمنة
-/// ومتّسقة مع تسمية بقية الأكواد (`SLOT_UNAVAILABLE`…)، ويجب تأكيدها مع فريق
-/// السيرفر قبل الاعتماد النهائي.
+/// حالة «بانتظار الاعتماد»: `GET /customer/today` يعيد `accountStatus:
+/// pending` (والجلسة `account.status`)، ونقاط الحجز تعيد `403 ACCOUNT_PENDING`
+/// — كلاهما يقود لشاشة الانتظار.
 class SessionController extends StateNotifier<SessionState> {
   SessionController(this._factory, this._store) : super(const SessionState()) {
     _bootstrap();
@@ -88,10 +85,13 @@ class SessionController extends StateNotifier<SessionState> {
 
   Future<void> _confirmActiveAccount(CustomerApi api, String code) async {
     try {
-      await api.getCustomerToday();
-      state = state.copyWith(status: SessionStatus.ready, clearError: true);
+      final today = await api.getCustomerToday();
+      state = state.copyWith(
+        status: today.accountPending ? SessionStatus.pendingApproval : SessionStatus.ready,
+        clearError: true,
+      );
     } on ApiError catch (e) {
-      if (e.code == 'ACCOUNT_PENDING') {
+      if (e.isAccountPending) {
         state = state.copyWith(status: SessionStatus.pendingApproval, clearError: true);
       } else if (e.code == 'SIGNED_OUT') {
         await _store.clearActive();

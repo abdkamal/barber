@@ -32,12 +32,32 @@ final session = await client.loginCustomer(
 );
 ```
 
+### الجلسة
+
+`Session` = `{accessToken, accessTokenExpiresIn, refreshToken, role, salon:
+SalonInfo{code, name, status, timezone, currency}, account: AccountInfo{id, name,
+status?}}` كما يعيدها السيرفر (`session.salonCode` اختصار لـ`salon.code`؛ الجلسات
+المحفوظة بإصدار أقدم — `salon` نص — تُقرأ أيضًا). `getSessionInfo()` ←
+`GET /auth/session` (مثل انتهاء «بانتظار التفعيل»)، و`registerSalon(salon:, owner:)`
+← `SalonRegistration{salon, session}` ويحفظ جلسة المالك.
+
 ### تجديد الجلسة والخروج
 
 `ApiClient` يجدّد رمز الوصول تلقائيًا عند 401، بمحاولة تجديد واحدة متزامنة
-(single-flight) حتى مع طلبات متعددة متزامنة. إن فشل التجديد يُطلق حدثًا على
-`client.onSignedOut` ويرمي `ApiError(code: 'SIGNED_OUT')`؛ على التطبيق
-الاستماع لهذا التيار وإعادة توجيه المستخدم لشاشة الدخول.
+(single-flight) حتى مع طلبات متعددة متزامنة.
+- **رفض السيرفر** للتجديد (401/403: رمز منتهٍ أو ملغى أو حساب موقوف) ← تُمسح
+  الجلسة، يُطلق حدث على `client.onSignedOut`، ويُرمى `ApiError(code: 'SIGNED_OUT')`.
+- **فشل الشبكة/المهلة أو خطأ سيرفر مؤقت** (5xx/429) أثناء التجديد ← **لا** خروج:
+  تبقى الجلسة محفوظة ويُرمى `ApiError` قابل لإعادة المحاولة (`isNetwork` لفشل
+  الشبكة)؛ الطلب التالي يعيد محاولة التجديد.
+
+### الأخطاء
+
+`ApiError{code, message, statusCode, retryAfter, details}` — `details` كما يرسلها
+السيرفر. مساعدات: `isNetwork`، `isSignedOut`، `isAccountPending` (`403
+ACCOUNT_PENDING`)، `changeTimeOffer` (عرض أقرب وقت من `409 SLOT_UNAVAILABLE`
+عند تعديل الوقت — يُقبل بـ`createBooking(offerId:)`)، `transferAlternatives`
+(`409 TRANSFER_NO_SLOT`).
 
 ### `Idempotency-Key`
 
@@ -68,10 +88,23 @@ engine.connectionState.listen((state) {
 });
 
 await engine.recordEvent(DeviceEventType.serviceStarted, bookingId: 'b1');
+await engine.flushNow(); // إرسال فوري متجاوزًا التراجع الأُسّي + نبضة + سحب
 
 // إضافة زبون حاضر — تُرفض محليًا وفورًا دون اتصال (design.md §10):
 await engine.createWalkIn(name: '...', phone: '...', serviceIds: [...]);
 ```
+
+### حالة الاتصال (`ConnectionState`)
+
+- لا تُبث حالة مطابقة للسابقة (نفس الحالة و`since` وعدد المعلّق).
+- `since` ثابت ما دامت الحالة المستقرة (`online`/`offline`) لم تتغير — النبضات
+  المتتالية لا تجدده؛ `offline.since` = لحظة بدء الانقطاع فعلًا.
+- `syncing` تظهر فقط أثناء إرسال أحداث من الصندوق، لا مع كل نبضة؛ وتُعدّ اتصالًا
+  (`isOnline`) فلا تُرفض إضافة الحاضر أثناءها.
+- الحالة الابتدائية `offline` قبل أول محاولة؛ `hasAttempted` يميّزها عن انقطاع فعلي.
+- النبضة ترسل **آخر** رقم تسلسل استُخدم (`LocalStore.currentDeviceSeq`) دون
+  استهلاك رقم جديد، وبلا `queueDigest` (السيرفر يتجاهله).
+- السحب يتابع `hasMore` حتى النهاية ويمرر التغييرات لـ`onChanges`.
 
 ### الساعة الرتيبة (`MonotonicClock`)
 
@@ -86,11 +119,13 @@ await engine.createWalkIn(name: '...', phone: '...', serviceIds: [...]);
 كل حدث يُحفظ محليًا فور وقوعه، قبل أي محاولة إرسال. `flush()` يرسل الأحداث
 المستحقة بترتيب رقم تسلسل الجهاز عبر `POST /sync/events`، ويطابق النتيجة لكل
 حدث:
+- دفعات حتى 200 حدث (حد السيرفر)، بالترتيب، والتوقف عند أول فشل.
 - `applied`/`duplicate` ← يُحذف من الصندوق.
 - `rejected` ← يُحذف أيضًا (لا فائدة من إعادة إرسال انتقال غير صالح؛ السيرفر
   سجّله للمدير حسب design.md §6.2).
 - فشل شبكة كامل ← تراجع أُسّي (`2s, 4s, 8s, ...` حتى سقف 60 ث) قبل إعادة
-  المحاولة.
+  المحاولة؛ `flush(force: true)` / `engine.flushNow()` يتجاوزه (تحديث يدوي أو
+  عودة الشبكة). `OutboxFlushResult.outcomes`/`rejected` تعيد نتائج السيرفر.
 
 ### التخزين المحلي (`LocalStore`)
 
@@ -125,36 +160,51 @@ await engine.createWalkIn(name: '...', phone: '...', serviceIds: [...]);
 (design.md §6.1: «يُمسح عند الخروج أو إيقاف الحساب»). على التطبيق أيضًا مسح
 مفتاح SQLCipher عبر `wipeStaffSyncEncryptionKey()` عند نفس الحدث.
 
-## قرارات وافتراضات (لا يحسمها `api.md` صراحة)
+## النماذج مقابل السيرفر
 
-هذه اختيارات آمنة اتُّخذت عند غموض العقد، ويجدر تأكيدها مع فريق السيرفر:
+كل نموذج مطابق لما يرسله السيرفر فعلًا (`server/src`، و«أشكال مثبّتة» في
+`docs/api.md`) ومختبر بعينات منه (`test/server_shapes_test.dart`) وبالاختبار
+الشامل على السيرفر الحقيقي (`e2e/`):
 
-1. **شكل `SyncChange`** (`GET /sync?since=`): `api.md` لا يفصّل حقول كل
-   تغيير. اعتُمد شكل عام `{seq, type, bookingId?, data, occurredAt}` مرن
-   يستوعب أي نوع تغيير يرسله السيرفر لاحقًا.
-2. **`Idempotency-Key` على `POST /bookings/quote`**: العقد يذكره صراحة فقط
-   لما «ينشئ أو يغيّر حجزًا أو دفعًا»، لكن العرض (`offer`) يحجز مكانًا فعليًا
-   (ق13)، فأُضيف احتياطًا لمنع ازدواج حجز العرض عند إعادة الإرسال. كذلك على
-   `POST /manager/bookings/{id}/transfer` لأنه يغيّر حجزًا.
-3. **مسارات المدير**: لا نماذج Dart مخصّصة لها (غير مطلوبة صراحة في هذه
-   المهمة) — `ApiClient` يمرّر/يعيد `Map<String, dynamic>`/`List<dynamic>`
-   خامًا لكل مسارات `/manager/*`.
-4. **`WS /staff/stream`**: لم يُنفَّذ عميل WebSocket في هذه الحزمة. آلية
-   السحب الدورية (`GET /sync?since=` كل 30 ثانية عبر `StaffSyncEngine`) تفي
-   بمتطلب المزامنة الأساسي في design.md §6؛ الدفع اللحظي عبر WebSocket
-   تحسين إضافي مذكور في design.md §6.3 ولم يُطلب صراحة في نطاق هذه المهمة.
-   يُنصح بإضافته لاحقًا لتقليل الكمون بين نبضة وأخرى.
-5. **صيغة JSON**: النماذج مكتوبة يدويًا (`toJson`/`fromJson`) بدل
-   `json_serializable`/`build_runner` لتبسيط الصيانة وتفادي خطوة بناء إضافية
-   للنموذج (النماذج بسيطة نسبيًا). Drift (لصندوق المزامنة) يستخدم
-   `build_runner` بالفعل (`dart run build_runner build`) والملفات المولَّدة
-   (`*.g.dart`) محفوظة في المستودع.
+| الطلب | النموذج |
+|---|---|
+| `GET /salons/{code}` | `SalonPublicProfile` (`about`, `logo`, `location`, `contact.social[]`, `photos[{id,url,position}]`, `hours[{weekday,opensAt,closesAt,crossesMidnight}]`, `openNow`, `services`, `catalog[{kind,price,photo…}]`) |
+| `GET /customer/today` | `CustomerToday{accountStatus, currency, services, barbers[Barber + accepting/workStart/workEnd]}` |
+| `POST /bookings`، `change-time`، `cancel`، walk-ins، النقل | `Booking` بكل الحقول الإضافية (`customerName`, `customerPhone`, `services[]`, `priceCents`, `estimatedDurationMin`, `eta`, `etaEnd`, `calledAt`, `serveLate`, `workDate`…)؛ الحالة `expired` مدعومة |
+| `GET /bookings/current` | `CurrentBooking?` — `null` عند `{"booking": null}` (ويُقبل `404 NO_ACTIVE_BOOKING` القديم) |
+| `GET /customer/history` | `List<HistoryVisit{booking, barberName, payment?}>` |
+| `GET /staff/today` | `StaffToday{day?, queue, services, breaks[+open], walkInOnly[TimeWindow], closingWarnings, settings, serverTime, seq}` |
+| `POST /staff/impact` | `StaffImpact` |
+| `GET /staff/payments` | `Payment` (+ `customerName`, `finishedAt`, `workDate`…) |
+| `POST /heartbeat` | `HeartbeatResult` |
+| `GET /manager/queues` / النقل | `ManagerQueues` / `Booking` |
+| `GET /manager/phone-disputes` | `PhoneDispute` |
+
+`BreakKind.walkInOnly` (`walk_in_only`) لاستراحات المدير؛ لا يبدأها جهاز الحلاق.
+`PushNotification`/`NotificationKind` لحمولة FCM بكل الأنواع (منها `transferred` و`base_duration_suspect`).
+
+مسارات المدير الأخرى (الملف، الكتالوج، الخدمات، الطاقم، الإعدادات، التقارير)
+تمرر JSON كما هو (`Map`)، مع: رفع الصور `multipart/form-data` (`uploadManagerPhoto`،
+`uploadManagerLogo`، `uploadManagerCatalogPhoto`)، `putManagerSchedule` (PUT)،
+حذف الدوام/الاستراحات/الإجازات، `getManagerReports` بتواريخ أيام العمل
+`YYYY-MM-DD`، و`resolveMediaUrl` لروابط `/v1/media/…` النسبية. `serverWeekday`
+يحوّل يوم Dart إلى ترقيم السيرفر (الأحد = 0).
+
+## قرارات وافتراضات
+
+1. **`Idempotency-Key` على `POST /bookings/quote`** و`POST /manager/bookings/{id}/transfer`
+   احتياطًا (العرض يحجز مكانًا فعليًا — ق13؛ والنقل يغيّر حجزًا).
+2. **`WS /staff/stream`**: لم يُنفَّذ عميل WebSocket؛ السحب الدوري كل 30 ث عبر
+   `StaffSyncEngine` يفي بمتطلب المزامنة، و`flushNow()` بعد كل إجراء يقلل الكمون.
+3. **صيغة JSON**: النماذج مكتوبة يدويًا (`toJson`/`fromJson`)؛ Drift (لصندوق
+   المزامنة) يستخدم `build_runner` والملفات المولَّدة محفوظة في المستودع.
 
 ## الاختبارات
 
 ```
-dart pub get   # أو: flutter pub get (الحزمة تعتمد على Flutter لـ flutter.dart)
+flutter pub get   # الحزمة تعتمد على Flutter لـ flutter.dart
 dart run build_runner build   # يولّد drift_database.g.dart عند تعديل الجداول
 dart test
 dart analyze
+../../e2e/run.sh   # الاختبار الشامل على السيرفر الحقيقي
 ```

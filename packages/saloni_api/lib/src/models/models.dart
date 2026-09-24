@@ -7,6 +7,7 @@ export 'enums.dart';
 export 'errors.dart';
 export 'manager.dart';
 export 'payment.dart';
+export 'push_notification.dart';
 export 'quote.dart';
 export 'salon_public_profile.dart';
 export 'service.dart';

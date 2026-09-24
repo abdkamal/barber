@@ -56,7 +56,12 @@ class _AboutSalonScreenState extends State<AboutSalonScreen> {
               return _ErrorView(onRetry: _retry, message: '${snap.error}');
             }
             final profile = snap.data!;
-            return _Loaded(profile: profile, onContinue: widget.onContinue, showContinueCta: widget.showContinueCta);
+            return _Loaded(
+              profile: profile,
+              media: widget.api.mediaUrl,
+              onContinue: widget.onContinue,
+              showContinueCta: widget.showContinueCta,
+            );
           },
         ),
       ),
@@ -83,15 +88,23 @@ class _ErrorView extends StatelessWidget {
 }
 
 class _Loaded extends StatelessWidget {
-  const _Loaded({required this.profile, required this.onContinue, required this.showContinueCta});
+  const _Loaded({
+    required this.profile,
+    required this.media,
+    required this.onContinue,
+    required this.showContinueCta,
+  });
 
   final api.SalonPublicProfile profile;
+  final String? Function(String?) media;
   final VoidCallback? onContinue;
   final bool showContinueCta;
 
   String? get _instagramHandle {
     for (final link in profile.contact.socialLinks) {
-      if (link.contains('instagram')) return link;
+      if (link.platform.toLowerCase().contains('instagram') || link.url.contains('instagram')) {
+        return link.url;
+      }
     }
     return null;
   }
@@ -104,19 +117,41 @@ class _Loaded extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final services = profile.catalog.where((c) => c.type == api.CatalogItemType.service && c.visible);
+    final catalogServices = profile.catalog.where((c) => c.type == api.CatalogItemType.service && c.visible).toList();
+    // بلا كتالوج خدمات بعد: تُعرض الخدمات القابلة للحجز نفسها.
+    final services = catalogServices.isNotEmpty
+        ? catalogServices
+        : [
+            for (final s in profile.services)
+              api.CatalogItem(
+                id: s.id,
+                type: api.CatalogItemType.service,
+                name: s.name,
+                priceCents: s.priceCents,
+                serviceId: s.id,
+              ),
+          ];
     final products = profile.catalog.where((c) => c.type == api.CatalogItemType.product && c.visible);
     final now = DateTime.now();
     final todayWeekday = now.weekday % 7; // Dart: 1=Mon..7=Sun -> نحوّل الأحد=0
-    final days = profile.workingHours
-        .map((h) => ui.SaloniHoursDay(
-              day: weekdayNameArabic(h.weekday),
-              from: h.closed ? null : formatClockFromMinutes(h.openMinutes),
-              to: h.closed ? null : formatClockFromMinutes(h.closeMinutes),
-              closed: h.closed,
-              today: h.weekday == todayWeekday,
-            ))
-        .toList();
+    // الأيام الغائبة من `hours` مغلقة؛ العرض يبدأ بالسبت كما في التصميم.
+    final byDay = {for (final h in profile.hours) h.weekday: h};
+    final days = profile.hours.isEmpty
+        ? const <ui.SaloniHoursDay>[]
+        : [
+            for (final w in const [6, 0, 1, 2, 3, 4, 5])
+              if (byDay[w] case final h?)
+                ui.SaloniHoursDay(
+                  day: weekdayNameArabic(w),
+                  from: formatClockFromMinutes(h.openMinutes),
+                  to: formatClockFromMinutes(h.closeMinutes),
+                  today: w == todayWeekday,
+                )
+              else
+                ui.SaloniHoursDay(day: weekdayNameArabic(w), closed: true, today: w == todayWeekday),
+          ];
+    final cover = profile.photos.isEmpty ? null : media(profile.photos.first.url);
+    final logo = media(profile.logoUrl);
 
     return CustomScrollView(
       slivers: [
@@ -128,9 +163,9 @@ class _Loaded extends StatelessWidget {
             background: Container(
               alignment: Alignment.center,
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: profile.photos.isEmpty
+              child: cover == null
                   ? Text('[صور الصالون]', style: Theme.of(context).textTheme.bodySmall)
-                  : Image.network(profile.photos.first.url, fit: BoxFit.cover, width: double.infinity),
+                  : Image.network(cover, fit: BoxFit.cover, width: double.infinity),
             ),
           ),
         ),
@@ -141,26 +176,36 @@ class _Loaded extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  ui.SaloniAvatar(name: profile.name, size: 72),
+                  logo == null
+                      ? ui.SaloniAvatar(name: profile.name, size: 72)
+                      : ClipOval(
+                          child: Image.network(logo, width: 72, height: 72, fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => ui.SaloniAvatar(name: profile.name, size: 72)),
+                        ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      profile.name,
-                      style: Theme.of(context).textTheme.headlineSmall,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(profile.name, style: Theme.of(context).textTheme.headlineSmall),
+                        if (profile.hours.isNotEmpty)
+                          Text(profile.openNow ? 'مفتوح الآن' : 'مغلق الآن',
+                              style: Theme.of(context).textTheme.bodySmall),
+                      ],
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
-              if (profile.bio != null) ...[
-                Text(profile.bio!, style: Theme.of(context).textTheme.bodyMedium),
+              if (profile.about != null) ...[
+                Text(profile.about!, style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 16),
               ],
               ui.ContactBar(
                 address: profile.address,
                 phone: profile.contact.phone,
                 whatsapp: profile.contact.whatsapp,
-                showMaps: profile.latitude != null && profile.longitude != null || profile.address != null,
+                showMaps: profile.hasLocation || profile.address != null,
                 instagram: _instagramHandle,
                 onCall: profile.contact.phone == null
                     ? null
@@ -186,7 +231,7 @@ class _Loaded extends StatelessWidget {
                     child: ui.CatalogItem(
                       kind: ui.SaloniCatalogKind.service,
                       name: s.name,
-                      price: (s.priceCents / 100).toStringAsFixed(0),
+                      price: s.priceCents == null ? '—' : (s.priceCents! / 100).toStringAsFixed(0),
                       currency: profile.currency,
                       description: s.description,
                       features: s.features,
@@ -203,7 +248,7 @@ class _Loaded extends StatelessWidget {
                     child: ui.CatalogItem(
                       kind: ui.SaloniCatalogKind.product,
                       name: p.name,
-                      price: (p.priceCents / 100).toStringAsFixed(0),
+                      price: p.priceCents == null ? '—' : (p.priceCents! / 100).toStringAsFixed(0),
                       currency: profile.currency,
                       description: p.description,
                       features: p.features,

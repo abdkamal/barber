@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:saloni_api/saloni_api.dart' as sa;
 import 'package:saloni_staff/app.dart';
+import 'package:saloni_ui/saloni_ui.dart' show SaloniFonts;
 import 'package:saloni_staff/core/platform/device_services.dart';
 import 'package:saloni_staff/core/platform/push.dart';
 import 'package:saloni_staff/core/platform/storage.dart';
@@ -20,21 +21,23 @@ bool _fontsLoaded = false;
 Future<void> loadDesignFonts() async {
   if (_fontsLoaded) return;
   _fontsLoaded = true;
+  // الخطوط من حزمة saloni_ui نفسها، بالاسم الذي تسجّله Flutter لخطوط الحزم
+  // (`packages/saloni_ui/…`) — وهو ما تطلبه أنماط نظام التصميم.
   Future<void> load(String family, List<String> files) async {
     final loader = FontLoader(family);
     for (final f in files) {
-      loader.addFont(rootBundle.load('assets/fonts/$f'));
+      loader.addFont(rootBundle.load('packages/saloni_ui/assets/fonts/$f'));
     }
     await loader.load();
   }
 
-  await load('El Messiri', ['ElMessiri.ttf']);
-  await load('IBM Plex Sans Arabic', [
+  await load(SaloniFonts.displayFamily, ['ElMessiri.ttf']);
+  await load(SaloniFonts.textFamily, [
     'IBMPlexSansArabic-Regular.ttf',
     'IBMPlexSansArabic-Medium.ttf',
     'IBMPlexSansArabic-SemiBold.ttf',
   ]);
-  await load('IBM Plex Mono', ['IBMPlexMono-Medium.ttf']);
+  await load(SaloniFonts.monoFamily, ['IBMPlexMono-Medium.ttf']);
 }
 
 class Harness {
@@ -70,7 +73,14 @@ Future<Harness> pumpStaffApp(
         accessToken: 'access',
         refreshToken: 'refresh',
         role: sa.UserRole.fromWire(server.role),
-        salonCode: 'RAHA-27',
+        salon: const sa.SalonInfo(
+          code: 'RAHA-27',
+          name: 'صالون الراحة',
+          status: 'active',
+          timezone: 'Asia/Riyadh',
+          currency: 'SAR',
+        ),
+        account: const sa.AccountInfo(id: 'barber-1', name: 'خالد الحربي'),
       ),
       persist: true,
     );

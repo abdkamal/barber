@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 /// سيرفر وهمي في الذاكرة يحاكي أشكال استجابة `server/` لمسارات الطاقم والمدير
-/// المستخدمة في الاختبارات. يمرّ عبر `ApiClient` الحقيقي وغلاف التوافق.
+/// المستخدمة في الاختبارات، عبر `ApiClient` الحقيقي.
 class FakeServer {
   FakeServer({this.role = 'barber'});
 
@@ -29,9 +29,12 @@ class FakeServer {
   Map<String, dynamic>? registered;
   final List<Map<String, dynamic>> schedulesPut = [];
   final List<Map<String, dynamic>> servicesCreated = [];
+  final List<Map<String, dynamic>> transfers = [];
 
   List<String> get eventTypes => [for (final e in events) e['type'] as String];
 
+  /// حجز بالشكل الذي يرسله السيرفر (`BookingDto` + `customerPhone`) ويُضاف
+  /// إلى طابور هذا الحلاق.
   Map<String, dynamic> booking({
     required String id,
     required String name,
@@ -44,10 +47,45 @@ class FakeServer {
     int? startedMinAgo,
     int durationMin = 30,
   }) {
-    final b = {
+    final b = bookingJson(
+      id: id,
+      name: name,
+      status: status,
+      serviceIds: serviceIds,
+      position: position,
+      etaInMin: etaInMin,
+      postponementUsed: postponementUsed,
+      walkIn: walkIn,
+      startedMinAgo: startedMinAgo,
+      durationMin: durationMin,
+    );
+    queue.add(b);
+    return b;
+  }
+
+  Map<String, dynamic> bookingJson({
+    required String id,
+    String barberId = 'barber-1',
+    required String name,
+    String status = 'waiting',
+    List<String> serviceIds = const ['s-hair'],
+    int position = 1,
+    int etaInMin = 30,
+    bool postponementUsed = false,
+    bool walkIn = false,
+    int? startedMinAgo,
+    int durationMin = 30,
+  }) {
+    final svc = [
+      for (final sid in serviceIds)
+        for (final s in services)
+          if (s['id'] == sid)
+            {'id': sid, 'name': s['name'], 'priceCents': s['priceCents'], 'baseDurationMin': s['baseDurationMin']},
+    ];
+    return {
       'id': id,
       'customerId': 'c-$id',
-      'barberId': 'barber-1',
+      'barberId': barberId,
       'serviceIds': serviceIds,
       'kind': 'queue',
       'requestedAt': null,
@@ -63,17 +101,46 @@ class FakeServer {
       'source': walkIn ? 'barber' : 'app',
       'walkIn': walkIn,
       'createdAt': now.toIso8601String(),
+      'workDate': '2026-09-24',
       'customerName': name,
       'customerPhone': '0500000000',
+      'services': svc,
       'priceCents': 4000,
       'estimatedDurationMin': durationMin,
       'eta': now.add(Duration(minutes: etaInMin)).toIso8601String(),
+      'etaEnd': now.add(Duration(minutes: etaInMin + durationMin)).toIso8601String(),
       'calledAt': status == 'called' ? now.subtract(const Duration(minutes: 5)).toIso8601String() : null,
+      'offerExpiresAt': null,
+      'lastChangeReason': null,
       'serveLate': false,
+      'needsReview': false,
     };
-    queue.add(b);
-    return b;
   }
+
+  /// حلاق في `GET /manager/queues`.
+  Map<String, dynamic> queueBarber({
+    required String id,
+    required String name,
+    String? state = 'connected',
+    bool accepting = true,
+    List<Map<String, dynamic>> queue = const [],
+  }) =>
+      {
+        'id': id,
+        'name': name,
+        'role': 'barber',
+        'day': state == null
+            ? null
+            : {
+                'workDate': '2026-09-24',
+                'workStart': now.subtract(const Duration(hours: 3)).toIso8601String(),
+                'workEnd': now.add(const Duration(hours: 8)).toIso8601String(),
+                'state': state,
+                'firstConnectedAt': null,
+              },
+        'accepting': accepting,
+        'queue': queue,
+      };
 
   Map<String, dynamic> session() => {
         'accessToken': 'access',
@@ -128,7 +195,13 @@ class FakeServer {
         return http.Response('', 204);
       case 'GET /staff/today':
         return json({
-          'day': {'workDate': '2026-09-24', 'state': 'connected'},
+          'day': {
+            'workDate': '2026-09-24',
+            'workStart': now.subtract(const Duration(hours: 3)).toIso8601String(),
+            'workEnd': now.add(const Duration(hours: 8)).toIso8601String(),
+            'state': 'connected',
+            'firstConnectedAt': now.subtract(const Duration(hours: 3)).toIso8601String(),
+          },
           'queue': queue,
           'breaks': [],
           'walkInOnly': [],
@@ -148,10 +221,17 @@ class FakeServer {
         return json({
           'changes': [],
           'seq': seq,
+          'hasMore': false,
           'serverTime': DateTime.now().toUtc().toIso8601String(),
         });
       case 'POST /heartbeat':
-        return json({'serverTime': DateTime.now().toUtc().toIso8601String(), 'seq': seq});
+        return json({
+          'serverTime': DateTime.now().toUtc().toIso8601String(),
+          'seq': seq,
+          'workDate': '2026-09-24',
+          'state': 'connected',
+          'reconnected': false,
+        });
       case 'POST /staff/walk-ins':
         final b = body();
         final created = walkInResult ??
@@ -168,7 +248,13 @@ class FakeServer {
       case 'GET /staff/payments':
         return json([]);
       case 'GET /manager/queues':
-        return json(managerQueues);
+        return json({'serverTime': DateTime.now().toUtc().toIso8601String(), 'seq': seq, 'barbers': managerQueues});
+      case 'GET /auth/session':
+        final sess = session();
+        final salon = registered != null
+            ? {'code': 'NEW-42', 'name': 'صالون جديد', 'status': 'pending_activation', 'timezone': 'Asia/Riyadh', 'currency': 'SAR'}
+            : sess['salon'];
+        return json({'role': registered != null ? 'manager' : sess['role'], 'accountId': 'barber-1', 'salon': salon});
       case 'GET /manager/settings':
         return json({'requireAccountApproval': false, 'maxActiveBookingsPerCustomer': 1});
       case 'GET /manager/breaks':
@@ -205,7 +291,9 @@ class FakeServer {
         });
     }
     if (req.method == 'POST' && path.startsWith('/manager/bookings/') && path.endsWith('/transfer')) {
-      return http.Response('', 204);
+      final id = path.split('/')[3];
+      transfers.add({'bookingId': id, ...body()});
+      return json(bookingJson(id: id, name: 'زبون', barberId: body()['toBarberId'] as String));
     }
     return json({
       'error': {'code': 'NOT_FOUND', 'message': 'غير موجود: $path'}

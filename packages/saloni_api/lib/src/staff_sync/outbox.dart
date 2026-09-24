@@ -8,6 +8,7 @@ class OutboxFlushResult {
     required this.sent,
     required this.remaining,
     this.error,
+    this.outcomes = const [],
   });
 
   /// عدد الأحداث التي طُبّقت أو تكررت (أُزيلت من الصندوق).
@@ -17,6 +18,13 @@ class OutboxFlushResult {
   final int remaining;
 
   final ApiError? error;
+
+  /// نتائج السيرفر لكل حدث أُرسل (بترتيب الإرسال).
+  final List<SyncEventOutcome> outcomes;
+
+  /// الأحداث التي رفضها السيرفر (أُزيلت من الصندوق).
+  List<SyncEventOutcome> get rejected =>
+      outcomes.where((o) => o.result == SyncEventResult.rejected).toList();
 
   bool get succeeded => error == null;
 }
@@ -73,29 +81,42 @@ class Outbox {
       return OutboxFlushResult(sent: 0, remaining: all.length);
     }
 
-    List<SyncEventOutcome> outcomes;
-    try {
-      // حدّ السيرفر 200 حدث للدفعة.
-      outcomes = [];
-      for (var i = 0; i < due.length; i += 200) {
-        final chunk = due.skip(i).take(200).map((e) => e.event).toList();
-        outcomes.addAll(await api.pushSyncEvents(chunk));
+    var sent = 0;
+    final received = <SyncEventOutcome>[];
+    // حدّ السيرفر 200 حدث للدفعة؛ الدفعات بالترتيب، والتوقف عند أول فشل.
+    for (var i = 0; i < due.length; i += 200) {
+      final chunk = due.skip(i).take(200).toList();
+      List<SyncEventOutcome> outcomes;
+      try {
+        outcomes = await api.pushSyncEvents(chunk.map((e) => e.event).toList());
+      } on ApiError catch (e) {
+        // فشل الإرسال — تراجع أُسّي لكل ما لم يُرسل بعد.
+        for (final entry in due.skip(i)) {
+          await store.putOutboxEntry(entry.copyWith(
+            attempts: entry.attempts + 1,
+            nextRetryAt: now.add(_backoffFor(entry.attempts + 1)),
+          ));
+        }
+        final remaining = await store.getOutbox();
+        return OutboxFlushResult(
+            sent: sent,
+            remaining: remaining.length,
+            error: e,
+            outcomes: received);
       }
-    } on ApiError catch (e) {
-      // فشل الإرسال بالكامل — تراجع أُسّي لكل الأحداث المستحقة.
-      for (final entry in due) {
-        await store.putOutboxEntry(entry.copyWith(
-          attempts: entry.attempts + 1,
-          nextRetryAt: now.add(_backoffFor(entry.attempts + 1)),
-        ));
-      }
-      final remaining = await store.getOutbox();
-      return OutboxFlushResult(sent: 0, remaining: remaining.length, error: e);
+      received.addAll(outcomes);
+      sent += await _apply(chunk, outcomes, now);
     }
+    final remaining = await store.getOutbox();
+    return OutboxFlushResult(
+        sent: sent, remaining: remaining.length, outcomes: received);
+  }
 
+  Future<int> _apply(
+      List<OutboxEntry> chunk, List<SyncEventOutcome> outcomes, DateTime now) async {
     var sent = 0;
     final byId = {for (final o in outcomes) o.eventId: o};
-    for (final entry in due) {
+    for (final entry in chunk) {
       final outcome = byId[entry.event.id];
       if (outcome == null) {
         // لم يرد ذكر هذا الحدث في الرد — يُعامل كفشل مؤقت، يُعاد لاحقًا.
@@ -116,7 +137,6 @@ class Outbox {
           await store.removeOutboxEntry(entry.event.id);
       }
     }
-    final remaining = await store.getOutbox();
-    return OutboxFlushResult(sent: sent, remaining: remaining.length);
+    return sent;
   }
 }

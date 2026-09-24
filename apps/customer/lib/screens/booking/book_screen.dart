@@ -66,12 +66,8 @@ class _BookScreenState extends State<BookScreen> {
   Future<void> _load() async {
     try {
       final today = await widget.api.getCustomerToday();
-      final services = ((today['services'] as List?) ?? [])
-          .map((e) => core.Service.fromJson(e as Map<String, dynamic>))
-          .toList();
-      final barbers = ((today['barbers'] as List?) ?? [])
-          .map((e) => core.Barber.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final services = today.services.where((s) => s.active).toList();
+      final barbers = today.barbers;
       setState(() {
         _services = services;
         _barbers = barbers;
@@ -318,15 +314,17 @@ class _BookScreenState extends State<BookScreen> {
                   child: ui.BarberOption(
                     name: b.name,
                     selected: _selectedBarberId == b.id,
-                    unavailable: b.nextAvailableStart == null,
+                    unavailable: !b.accepting || b.nextAvailableStart == null,
                     reason: b.dayState == core.BarberDayState.absentToday
                         ? 'لا يعمل اليوم'
-                        : (b.dayState == core.BarberDayState.disconnected ? 'غير متصل' : null),
+                        : b.workStart == null
+                            ? 'ليس في دوامه اليوم'
+                            : (b.dayState == core.BarberDayState.disconnected ? 'غير متصل' : null),
                     nextAt: b.nextAvailableStart == null ? null : formatHourMinute(b.nextAvailableStart!),
                     wait: b.nextAvailableStart == null
                         ? null
                         : 'بعد ${b.nextAvailableStart!.difference(DateTime.now().toUtc()).inMinutes.clamp(0, 999)} د',
-                    onTap: b.nextAvailableStart == null
+                    onTap: !b.accepting || b.nextAvailableStart == null
                         ? null
                         : () {
                             setState(() => _selectedBarberId = b.id);

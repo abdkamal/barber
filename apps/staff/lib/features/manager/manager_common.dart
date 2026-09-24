@@ -8,45 +8,6 @@ import '../../core/format.dart';
 import '../../state/app_services.dart';
 import '../common/ui.dart';
 
-/// مساعدات قراءة JSON المدير (api.md لا يفصّل الأشكال؛ القراءة متسامحة).
-
-String barberId(Map<String, dynamic> b) =>
-    str(b, ['barberId', 'id']).isNotEmpty ? str(b, ['barberId', 'id']) : str(b['barber'], ['id']);
-
-String barberName(Map<String, dynamic> b) =>
-    str(b, ['barberName', 'name'], str(b['barber'], ['name'], 'حلاق'));
-
-sa.BarberDayState? dayStateOf(Map<String, dynamic> b) {
-  final v = str(b, ['dayState', 'state'], str(b['barber'], ['dayState']));
-  try {
-    return v.isEmpty ? null : sa.BarberDayState.fromWire(v);
-  } catch (_) {
-    return null;
-  }
-}
-
-sa.BookingStatus statusOf(Map<String, dynamic> q) {
-  try {
-    return sa.BookingStatus.fromWire(str(q, ['status'], 'waiting'));
-  } catch (_) {
-    return sa.BookingStatus.waiting;
-  }
-}
-
-String servicesText(Map<String, dynamic> q) {
-  final names = q['serviceNames'] ?? q['services'];
-  if (names is List) {
-    return names.map((e) => e is Map ? (e['name'] ?? '') : e).join(' + ');
-  }
-  if (names is String) return names;
-  return 'خدمة';
-}
-
-String etaText(Map<String, dynamic> q) {
-  final t = DateTime.tryParse(str(q, ['eta', 'expectedStart', 'originalEta']));
-  return t == null ? '—' : hhmm(t);
-}
-
 /// شارة حالة يوم الحلاق (design.md §4).
 class DayStateBadge extends StatelessWidget {
   const DayStateBadge({super.key, required this.state});

@@ -1,8 +1,5 @@
-import 'dart:convert';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:saloni_api/saloni_api.dart' as sa;
-import 'package:saloni_staff/core/compat_http_client.dart';
 import 'package:saloni_staff/core/format.dart';
 import 'package:saloni_staff/data/models.dart';
 import 'package:saloni_staff/data/queue_logic.dart';
@@ -82,24 +79,50 @@ void main() {
     expect(remainingWorkMinutes(q, now), 20 + 30);
   });
 
-  test('توافق الجلسة: salon ككائن يتحول إلى رمز مع حفظ بياناته', () {
-    final json = jsonDecode(jsonEncode({
+  test('الجلسة: بيانات الصالون والحساب من الحزمة مباشرة', () {
+    final session = sa.Session.fromJson({
       'accessToken': 'a',
       'refreshToken': 'r',
       'role': 'barber',
       'salon': {'code': 'RAHA-27', 'name': 'صالون', 'status': 'active', 'currency': 'SAR'},
       'account': {'id': '1', 'name': 'خالد'},
-    })) as Map<String, dynamic>;
-    Map<String, dynamic>? salon;
-    Map<String, dynamic>? account;
-    normalizeSessionJson(json, (s, a) {
-      salon = s;
-      account = a;
     });
-    final session = sa.Session.fromJson(json);
+    final meta = SalonMeta.fromInfo(session.salon);
     expect(session.salonCode, 'RAHA-27');
-    expect(salon?['name'], 'صالون');
-    expect(account?['name'], 'خالد');
+    expect(meta.name, 'صالون');
+    expect(meta.currency, 'SAR');
+    expect(session.account?.name, 'خالد');
+  });
+
+  test('إدخال الطابور من حجز السيرفر (الاسم والهاتف والمدة والسعر والوقت الحالي)', () {
+    final b = sa.Booking.fromJson({
+      'id': 'b1',
+      'customerId': 'c1',
+      'barberId': 'x',
+      'serviceIds': ['s1'],
+      'kind': 'queue',
+      'status': 'called',
+      'originalEta': '2026-09-24T10:00:00Z',
+      'source': 'app',
+      'customerName': 'سالم',
+      'customerPhone': '0500000000',
+      'priceCents': 5500,
+      'estimatedDurationMin': 35,
+      'eta': '2026-09-24T10:20:00Z',
+      'calledAt': '2026-09-24T10:18:00Z',
+      'serveLate': true,
+    });
+    final e = QueueEntry.from(b, const [], pastClosing: true);
+    expect(e.name, 'سالم');
+    expect(e.phone, '0500000000');
+    expect(e.durationMin, 35);
+    expect(e.priceCents, 5500);
+    expect(e.eta, DateTime.utc(2026, 9, 24, 10, 20));
+    expect(e.calledAt, isNotNull);
+    expect(e.closingDecided, isTrue);
+    final again = QueueEntry.from(e.toBooking(), const [], local: e.extrasJson());
+    expect(again.name, 'سالم');
+    expect(again.pastClosing, isTrue);
   });
 
   test('العملة والأرقام', () {
@@ -113,7 +136,8 @@ void main() {
   });
 
   test('معاينة الأثر: شكل السيرفر (changes + pastClosing)', () {
-    final p = ImpactPreview.fromJson({
+    final p = ImpactPreview.fromImpact(sa.StaffImpact.fromJson({
+      'bookingId': 'a',
       'changes': [
         {'bookingId': 'b', 'customerName': 'عبدالله', 'before': '2026-09-24T10:00:00Z', 'after': '2026-09-24T10:35:00Z', 'deltaMin': 35, 'pastClosing': false, 'notify': true},
       ],
@@ -121,7 +145,7 @@ void main() {
         {'bookingId': 'c', 'customerName': 'ريان', 'end': '2026-09-24T23:30:00Z'},
       ],
       'newDurationMin': 45,
-    });
+    }));
     expect(p.items, hasLength(2));
     expect(p.notified.single.name, 'عبدالله');
     expect(p.pastClosing.single.bookingId, 'c');

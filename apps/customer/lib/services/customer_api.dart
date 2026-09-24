@@ -6,6 +6,9 @@ import 'package:saloni_api/saloni_api.dart';
 abstract class CustomerApi {
   Future<SalonPublicProfile> getSalonProfile(String code);
 
+  /// رابط كامل لصورة يعيدها السيرفر نسبيًا (`/v1/media/…`).
+  String? mediaUrl(String? url);
+
   Future<Session> registerCustomer({
     required String salonCode,
     required String name,
@@ -23,7 +26,7 @@ abstract class CustomerApi {
 
   Future<void> logout();
 
-  Future<Map<String, dynamic>> getCustomerToday();
+  Future<CustomerToday> getCustomerToday();
 
   Future<Quote> getQuote({
     required List<String> serviceIds,
@@ -43,7 +46,8 @@ abstract class CustomerApi {
 
   Future<void> rejectOffer(String offerId);
 
-  Future<CurrentBooking> getCurrentBooking();
+  /// الحجز النشط، أو `null` إن لم يوجد.
+  Future<CurrentBooking?> getCurrentBooking();
 
   Future<void> markBookingSeen(String bookingId, DateTime eta);
 
@@ -56,7 +60,7 @@ abstract class CustomerApi {
 
   Future<void> cancelBooking(String bookingId, {String? idempotencyKey});
 
-  Future<List<dynamic>> getCustomerHistory();
+  Future<List<HistoryVisit>> getCustomerHistory();
 
   Future<void> registerDevice({
     required String fcmToken,
@@ -76,6 +80,9 @@ class RealCustomerApi implements CustomerApi {
   @override
   Future<SalonPublicProfile> getSalonProfile(String code) =>
       _client.getSalonProfile(code);
+
+  @override
+  String? mediaUrl(String? url) => _client.resolveMediaUrl(url);
 
   @override
   Future<Session> registerCustomer({
@@ -111,7 +118,7 @@ class RealCustomerApi implements CustomerApi {
   Future<void> logout() => _client.logout();
 
   @override
-  Future<Map<String, dynamic>> getCustomerToday() => _client.getCustomerToday();
+  Future<CustomerToday> getCustomerToday() => _client.getCustomerToday();
 
   @override
   Future<Quote> getQuote({
@@ -149,7 +156,7 @@ class RealCustomerApi implements CustomerApi {
   Future<void> rejectOffer(String offerId) => _client.rejectOffer(offerId);
 
   @override
-  Future<CurrentBooking> getCurrentBooking() => _client.getCurrentBooking();
+  Future<CurrentBooking?> getCurrentBooking() => _client.getCurrentBooking();
 
   @override
   Future<void> markBookingSeen(String bookingId, DateTime eta) =>
@@ -170,11 +177,12 @@ class RealCustomerApi implements CustomerApi {
       );
 
   @override
-  Future<void> cancelBooking(String bookingId, {String? idempotencyKey}) =>
-      _client.cancelBooking(bookingId, idempotencyKey: idempotencyKey);
+  Future<void> cancelBooking(String bookingId, {String? idempotencyKey}) async {
+    await _client.cancelBooking(bookingId, idempotencyKey: idempotencyKey);
+  }
 
   @override
-  Future<List<dynamic>> getCustomerHistory() => _client.getCustomerHistory();
+  Future<List<HistoryVisit>> getCustomerHistory() => _client.getCustomerHistory();
 
   @override
   Future<void> registerDevice({

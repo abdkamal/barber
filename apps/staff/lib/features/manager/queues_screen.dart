@@ -21,7 +21,7 @@ class QueuesScreen extends ConsumerStatefulWidget {
 }
 
 class _QueuesScreenState extends ConsumerState<QueuesScreen> {
-  List<Map<String, dynamic>>? _barbers;
+  List<sa.ManagerBarberQueue>? _barbers;
   Object? _error;
   Timer? _timer;
 
@@ -40,10 +40,10 @@ class _QueuesScreenState extends ConsumerState<QueuesScreen> {
 
   Future<void> _load() async {
     try {
-      final raw = await ref.read(servicesProvider).api.getManagerQueues();
+      final queues = await ref.read(servicesProvider).api.getManagerQueues();
       if (!mounted) return;
       setState(() {
-        _barbers = listOf(raw);
+        _barbers = queues.barbers;
         _error = null;
       });
     } catch (e) {
@@ -51,10 +51,10 @@ class _QueuesScreenState extends ConsumerState<QueuesScreen> {
     }
   }
 
-  Future<void> _transfer(Map<String, dynamic> booking, Map<String, dynamic> from) async {
+  Future<void> _transfer(sa.Booking booking, sa.ManagerBarberQueue from) async {
     final others = [
-      for (final b in _barbers ?? const <Map<String, dynamic>>[])
-        if (barberId(b) != barberId(from)) b,
+      for (final b in _barbers ?? const <sa.ManagerBarberQueue>[])
+        if (b.id != from.id) b,
     ];
     final done = await showSaloniSheet<bool>(
       context,
@@ -103,7 +103,7 @@ class _QueuesScreenState extends ConsumerState<QueuesScreen> {
                 title: 'لا حلاقين بعد',
                 body: 'أضف الطاقم من الإعدادات ← الطاقم.',
               ),
-            for (final b in barbers ?? const <Map<String, dynamic>>[]) _BarberQueue(barber: b, onTransfer: _transfer),
+            for (final b in barbers ?? const <sa.ManagerBarberQueue>[]) _BarberQueue(barber: b, onTransfer: _transfer),
           ]),
         ),
       ],
@@ -113,20 +113,16 @@ class _QueuesScreenState extends ConsumerState<QueuesScreen> {
 
 class _BarberQueue extends StatelessWidget {
   const _BarberQueue({required this.barber, required this.onTransfer});
-  final Map<String, dynamic> barber;
-  final void Function(Map<String, dynamic> booking, Map<String, dynamic> from) onTransfer;
+  final sa.ManagerBarberQueue barber;
+  final void Function(sa.Booking booking, sa.ManagerBarberQueue from) onTransfer;
 
   @override
   Widget build(BuildContext context) {
-    final state = dayStateOf(barber);
-    final queue = listOf(barber, ['queue', 'bookings']);
-    final active = queue.where((q) {
-      final s = statusOf(q);
-      return s == sa.BookingStatus.waiting || s == sa.BookingStatus.called || s == sa.BookingStatus.inService;
-    }).toList();
+    final state = barber.day?.state;
+    final active = barber.queue.where((q) => q.isActive).toList();
     return Section(
-      title: barberName(barber),
-      trailing: DayStateBadge(state: state),
+      title: barber.name.isEmpty ? 'حلاق' : barber.name,
+      trailing: barber.day == null ? const Muted('خارج الدوام') : DayStateBadge(state: state),
       children: [
         if (state == sa.BarberDayState.absentToday && active.isNotEmpty)
           const SaloniBanner(
@@ -143,19 +139,17 @@ class _BarberQueue extends StatelessWidget {
         for (var i = 0; i < active.length; i++)
           QueueItem(
             position: i + 1,
-            name: str(active[i], ['customerName', 'name'], 'زبون'),
-            services: servicesText(active[i]),
-            eta: etaText(active[i]),
-            duration: intOf(active[i], ['estimatedDurationMin', 'durationMin']) == null
-                ? null
-                : minutesAr(intOf(active[i], ['estimatedDurationMin', 'durationMin'])!),
-            status: uiStatus(statusOf(active[i])),
-            walkIn: active[i]['walkIn'] == true,
-            requested: active[i]['kind'] == 'requested',
-            action: statusOf(active[i]) == sa.BookingStatus.inService
+            name: active[i].customerName ?? 'زبون',
+            services: active[i].services.isEmpty ? 'خدمة' : active[i].serviceNames,
+            eta: hhmm((active[i].eta ?? active[i].originalEta).toLocal()),
+            duration: active[i].durationMin == null ? null : minutesAr(active[i].durationMin!),
+            status: uiStatus(active[i].status),
+            walkIn: active[i].walkIn,
+            requested: active[i].kind == sa.BookingKind.requested,
+            action: active[i].status == sa.BookingStatus.inService
                 ? null
                 : SaloniButton(
-                    key: Key('transfer-${active[i]['id']}'),
+                    key: Key('transfer-${active[i].id}'),
                     label: 'نقل',
                     size: SaloniButtonSize.sm,
                     variant: SaloniButtonVariant.secondary,
@@ -170,9 +164,9 @@ class _BarberQueue extends StatelessWidget {
 /// ورقة النقل اليدوي (ق25).
 class TransferSheet extends ConsumerStatefulWidget {
   const TransferSheet({super.key, required this.booking, required this.from, required this.targets});
-  final Map<String, dynamic> booking;
-  final Map<String, dynamic> from;
-  final List<Map<String, dynamic>> targets;
+  final sa.Booking booking;
+  final sa.ManagerBarberQueue from;
+  final List<sa.ManagerBarberQueue> targets;
 
   @override
   ConsumerState<TransferSheet> createState() => _TransferSheetState();
@@ -191,11 +185,18 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
     });
     try {
       await ref.read(servicesProvider).api.transferBooking(
-            bookingId: widget.booking['id'].toString(),
+            bookingId: widget.booking.id,
             toBarberId: _to!,
             idempotencyKey: _key,
           );
       if (mounted) Navigator.of(context).pop(true);
+    } on sa.ApiError catch (e) {
+      // ق25: لا يتسع وقت الحلاق المختار — نقترح البدائل التي يعيدها السيرفر.
+      final alt = e.transferAlternatives;
+      final hint = alt.isEmpty
+          ? ''
+          : '\nمتاح عند: ${alt.map((a) => '${a.barberName} ${timeAr(a.start.toLocal())}').join('، ')}';
+      if (mounted) setState(() => _error = '${errorText(e)}$hint');
     } catch (e) {
       if (mounted) setState(() => _error = errorText(e));
     } finally {
@@ -206,29 +207,32 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
   @override
   Widget build(BuildContext context) {
     final c = context.saloniColors;
-    final name = str(widget.booking, ['customerName', 'name'], 'الزبون');
+    final name = widget.booking.customerName ?? 'الزبون';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text('نقل حجز $name', style: SaloniTextStyles.title2.copyWith(color: c.ink)),
-        Text('من ${barberName(widget.from)} إلى:',
+        Text('من ${widget.from.name} إلى:',
             style: SaloniTextStyles.caption.copyWith(color: c.inkMuted)),
         const SizedBox(height: 12),
         if (widget.targets.isEmpty) const Muted('لا يوجد حلاق آخر.'),
         for (final t in widget.targets) ...[
           Builder(builder: (_) {
-            final st = dayStateOf(t);
-            final unavailable = st == sa.BarberDayState.absentToday;
-            final next = DateTime.tryParse(str(t, ['nextAvailableStart']));
+            final st = t.day?.state;
+            final unavailable = t.day == null || st == sa.BarberDayState.absentToday || !t.accepting;
+            final reason = t.day == null
+                ? 'خارج الدوام'
+                : st == sa.BarberDayState.absentToday
+                    ? 'غائب اليوم'
+                    : (!t.accepting ? 'لا يستقبل الآن' : null);
             return BarberOption(
-              name: barberName(t),
-              nextAt: next == null ? null : timeAr(next),
-              note: '${digits('${listOf(t, ['queue', 'bookings']).length}')} في الطابور',
+              name: t.name,
+              note: '${digits('${t.queue.where((b) => b.isActive).length}')} في الطابور',
               unavailable: unavailable,
-              reason: unavailable ? 'غائب اليوم' : null,
-              selected: _to == barberId(t),
-              onTap: unavailable ? null : () => setState(() => _to = barberId(t)),
+              reason: unavailable ? reason : null,
+              selected: _to == t.id,
+              onTap: unavailable ? null : () => setState(() => _to = t.id),
             );
           }),
           const SizedBox(height: 8),

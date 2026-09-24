@@ -51,6 +51,15 @@ License 1.1 (نصوص الرخصة في `assets/fonts/licenses/`):
 مصدر الملفات: مستودع [google/fonts](https://github.com/google/fonts) (نفس
 الملفات التي توزّعها Google Fonts) عبر `raw.githubusercontent.com`.
 
+**التطبيقات لا تنسخ الخطوط.** Flutter تسجّل خطوط الحزمة المعتمَد عليها باسم
+`packages/saloni_ui/<العائلة>`، لذا تشير كل الأنماط والمكونات إلى
+`SaloniFonts.displayFamily`/`textFamily`/`monoFamily` (لا الأسماء المجردة
+`SaloniFonts.display`… التي تبقى أسماء الرموز كما في `tokens.json`). يكفي أن
+يعتمد التطبيق على `saloni_ui` ويستخدم `SaloniTheme`. لعرض تراخيص OFL في صفحة
+التراخيص استدعِ `registerSaloniFontLicenses()` في `main()`؛ ملفاتها متاحة أيضًا
+عبر `saloniFontLicenseAssets`. الإثبات: `example/test/packaged_fonts_test.dart`
+(يقرأ `FontManifest.json` لتطبيق مستهلك ويتحقق من كل عائلة يطلبها نمط).
+
 ## الأيقونات
 
 `phosphor_icons` (منفذ محدَّث من `phosphor_flutter` متوافق مع أن `IconData`

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:saloni_api/saloni_api.dart' show NotificationKind;
 import 'package:saloni_ui/saloni_ui.dart';
 
 import 'core/config.dart';
@@ -117,9 +118,10 @@ class _StaffAppState extends ConsumerState<StaffApp> {
       final text = [m.title, m.body].whereType<String>().where((t) => t.isNotEmpty).join(' — ');
       if (text.isEmpty) return;
       scaffoldMessengerKey.currentState?.showSnackBar(SnackBar(content: Text(text)));
+      // تنبيهات الطابور (استدعاء، نقل ق25، تغيّر الوقت…) أو تجاوز المدة: تحديث فوري.
       if (ref.read(authProvider).status == AuthStatus.signedIn &&
           ref.exists(barberRepoProvider) &&
-          m.type != 'account_pending') {
+          (m.kind.affectsQueue || m.kind == NotificationKind.overrun)) {
         ref.read(barberRepoProvider).refresh();
       }
     });

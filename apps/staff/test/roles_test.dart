@@ -29,18 +29,13 @@ void main() {
   });
 
   testWidgets('المدير: يبدأ بالطوابير ويرى التقارير', (tester) async {
-    final server = FakeServer(role: 'manager')
-      ..managerQueues = [
-        {
-          'barberId': 'b1',
-          'barberName': 'خالد',
-          'dayState': 'connected',
-          'queue': [
-            {'id': 'q1', 'customerName': 'فهد', 'status': 'waiting', 'services': [{'name': 'حلاقة شعر'}]},
-          ],
-        },
-        {'barberId': 'b2', 'barberName': 'سعد', 'dayState': 'absent_today', 'queue': []},
-      ];
+    final server = FakeServer(role: 'manager');
+    server.managerQueues = [
+      server.queueBarber(id: 'b1', name: 'خالد', queue: [
+        server.bookingJson(id: 'q1', name: 'فهد', barberId: 'b1'),
+      ]),
+      server.queueBarber(id: 'b2', name: 'سعد', state: 'absent_today', accepting: false),
+    ];
     final h = await pumpStaffApp(tester, server);
 
     expect(find.text('الطوابير'), findsWidgets);
@@ -63,6 +58,29 @@ void main() {
     expect(find.text('الإيراد المؤكد'), findsOneWidget);
     expect(find.text('1,240'), findsOneWidget);
     expect(find.text('حسب الحلاق'), findsOneWidget);
+    await teardownApp(tester, h);
+  });
+
+  testWidgets('المدير: نقل حجز إلى حلاق متاح (ق25) عبر GET /manager/queues و transfer', (tester) async {
+    final server = FakeServer(role: 'manager');
+    server.managerQueues = [
+      server.queueBarber(id: 'b1', name: 'خالد', queue: [
+        server.bookingJson(id: 'q1', name: 'فهد', barberId: 'b1'),
+      ]),
+      server.queueBarber(id: 'b3', name: 'ماجد'),
+      server.queueBarber(id: 'b4', name: 'بدر', state: null, accepting: false),
+    ];
+    final h = await pumpStaffApp(tester, server);
+    expect(find.text('خارج الدوام'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('transfer-q1')));
+    await settle(tester);
+    await tester.tap(find.text('ماجد').last);
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('transfer-confirm')));
+    await settle(tester);
+    expect(server.transfers.single, {'bookingId': 'q1', 'toBarberId': 'b3'});
+    expect(find.text('نُقل الحجز وأُبلغ الزبون'), findsOneWidget);
     await teardownApp(tester, h);
   });
 

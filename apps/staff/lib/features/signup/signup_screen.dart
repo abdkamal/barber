@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:saloni_api/saloni_api.dart' show serverWeekday;
 import 'package:saloni_ui/saloni_ui.dart';
 
 import '../../core/format.dart';
-import '../../core/raw_api.dart';
 import '../../state/app_services.dart';
 import '../common/ui.dart';
 
@@ -131,7 +131,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       // ساعات الصالون = دوام افتراضي لكل يوم (staffId: null) يظهر للزبائن.
       for (final d in _days.where((d) => d.open)) {
         try {
-          await services.raw.putSchedule(
+          await services.api.putManagerSchedule(
             weekday: serverWeekday(d.weekday),
             opensAt: wireTime(d.from),
             closesAt: wireTime(d.to),

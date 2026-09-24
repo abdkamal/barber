@@ -132,13 +132,17 @@ class _Segment extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                 ],
-                Text(
-                  option.label,
-                  style: TextStyle(
-                    fontFamily: SaloniFonts.textFamily,
-                    fontSize: 15,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    color: selected ? c.ink : c.inkMuted,
+                Flexible(
+                  child: Text(
+                    option.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: SaloniFonts.textFamily,
+                      fontSize: 15,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                      color: selected ? c.ink : c.inkMuted,
+                    ),
                   ),
                 ),
               ],

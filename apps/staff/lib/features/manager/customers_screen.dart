@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saloni_ui/saloni_ui.dart';
+import 'package:saloni_api/saloni_api.dart' as sa;
 
 import '../../state/app_services.dart';
 import '../common/shells.dart';
@@ -152,9 +153,9 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   }
 
   /// نزاع رقم (ق20): عدة سجلات حاضرين بنفس رقم حساب — يختار المدير السجل الصحيح.
-  Future<void> _resolve(Map<String, dynamic> d) async {
-    final walkIns = listOf(d, ['walkIns']);
-    final accountId = str(d, ['accountId']);
+  Future<void> _resolve(sa.PhoneDispute d) async {
+    final walkIns = d.walkIns;
+    final accountId = d.accountId ?? '';
     if (accountId.isEmpty) {
       toast(context, 'لا يوجد حساب تطبيق بهذا الرقم بعد — يُحل النزاع عند تسجيله.');
       return;
@@ -164,7 +165,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          SectionTitle('نزاع على الرقم ${str(d, ['phone'])}'),
+          SectionTitle('نزاع على الرقم ${d.phone}'),
           const SizedBox(height: 6),
           const Muted('اختر سجل الحاضر الذي يخص صاحب الحساب؛ يُربط به ويُسجَّل ذلك.'),
           const SizedBox(height: 12),
@@ -172,9 +173,9 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
             for (var i = 0; i < walkIns.length; i++)
               ValueRow(
                 first: i == 0,
-                label: str(walkIns[i], ['name'], 'حاضر'),
+                label: walkIns[i].name.isEmpty ? 'حاضر' : walkIns[i].name,
                 value: 'ربط',
-                onTap: () => Navigator.of(ctx).pop(str(walkIns[i], ['id'])),
+                onTap: () => Navigator.of(ctx).pop(walkIns[i].id),
               ),
           ]),
         ],
@@ -182,7 +183,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     });
     if (chosen == null) return;
     try {
-      await ref.read(servicesProvider).api.resolvePhoneDispute(accountId, {'walkInId': chosen});
+      await ref.read(servicesProvider).api.resolvePhoneDispute(accountId: accountId, walkInId: chosen);
       _reload();
     } catch (e) {
       if (mounted) toast(context, errorText(e));
@@ -192,18 +193,17 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   @override
   Widget build(BuildContext context) {
     final api = ref.read(servicesProvider).api;
-    final raw = ref.read(servicesProvider).raw;
     return DetailScaffold(
       title: 'الزبائن',
       subtitle: 'الاعتماد والإيقاف وربط السجلات',
-      body: AsyncView<(List<Map<String, dynamic>>, List<Map<String, dynamic>>)>(
+      body: AsyncView<(List<Map<String, dynamic>>, List<sa.PhoneDispute>)>(
         key: _reloadKey,
         load: () async {
           final customers = listOf(await api.getManagerCustomers(), ['customers', 'items']);
-          var disputes = const <Map<String, dynamic>>[];
+          var disputes = const <sa.PhoneDispute>[];
           try {
-            disputes = listOf(await raw.phoneDisputes());
-          } catch (_) {}
+            disputes = await api.getPhoneDisputes();
+          } on sa.ApiError catch (_) {}
           return (customers, disputes);
         },
         builder: (context, data, reload) {
@@ -224,7 +224,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
             for (final d in disputes)
               SaloniBanner(
                 tone: SaloniBannerTone.warning,
-                title: 'نزاع على الرقم ${str(d, ['phone'])}',
+                title: 'نزاع على الرقم ${d.phone}',
                 body: 'أكثر من سجل زبون حاضر بهذا الرقم — اختر السجل الذي يخص صاحب الحساب.',
                 action: SaloniButton(
                   label: 'حلّ النزاع',

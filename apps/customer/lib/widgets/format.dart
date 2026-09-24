@@ -53,3 +53,9 @@ String formatClockFromMinutes(int minutesSinceMidnight) {
   if (h12 == 0) h12 = 12;
   return '$h12:$m $ampm';
 }
+
+/// تاريخ زيارة مختصر بتوقيت الجهاز: «الخميس 24/9».
+String formatVisitDate(DateTime utc) {
+  final d = utc.toLocal();
+  return '${weekdayNameArabic(d.weekday)} ${d.day}/${d.month}';
+}

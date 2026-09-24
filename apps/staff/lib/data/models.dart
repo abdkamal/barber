@@ -20,6 +20,14 @@ class SalonMeta {
 
   bool get pendingActivation => status == 'pending_activation';
 
+  factory SalonMeta.fromInfo(sa.SalonInfo i) => SalonMeta(
+        code: i.code,
+        name: i.name,
+        status: i.status,
+        timezone: i.timezone,
+        currency: i.currency,
+      );
+
   factory SalonMeta.fromJson(Map<String, dynamic> j) => SalonMeta(
         code: (j['code'] ?? '').toString(),
         name: j['name']?.toString(),
@@ -145,41 +153,42 @@ class QueueEntry {
         createdAt: createdAt,
       );
 
-  /// يبني الإدخال من نموذج الحزمة + JSON الخام (للحقول الإضافية).
+  /// يبني الإدخال من حجز السيرفر (`sa.Booking` بكل حقوله) + حالة محلية
+  /// محفوظة على الجهاز ([local]: قرار الإغلاق، حالة الدفع المؤكدة محليًا…).
   factory QueueEntry.from(
     sa.Booking b,
-    Map<String, dynamic>? raw,
-    List<sa.Service> services,
-  ) {
-    final r = raw ?? const <String, dynamic>{};
-    final customer = r['customer'] is Map ? r['customer'] as Map : const {};
+    List<sa.Service> services, {
+    Map<String, dynamic>? local,
+    bool? pastClosing,
+  }) {
+    final r = local ?? const <String, dynamic>{};
     final durFromServices = _sumDuration(b.serviceIds, services);
     final priceFromServices = _sumPrice(b.serviceIds, services);
-    final payStatus = r['paymentStatus'] ?? (r['payment'] is Map ? (r['payment'] as Map)['status'] : null);
+    final payStatus = r['paymentStatus'];
     return QueueEntry(
       id: b.id,
       customerId: b.customerId,
       barberId: b.barberId,
-      name: (r['customerName'] ?? customer['name'] ?? r['name'] ?? 'زبون').toString(),
-      phone: (r['customerPhone'] ?? customer['phone'] ?? r['phone'])?.toString(),
+      name: b.customerName ?? (r['customerName'] as String?) ?? 'زبون',
+      phone: b.customerPhone ?? r['customerPhone'] as String?,
       status: b.status,
       serviceIds: b.serviceIds,
       kind: b.kind,
       requestedAt: b.requestedAt,
       originalEta: b.originalEta,
-      eta: _date(r['eta'] ?? r['expectedStart']) ?? b.lastShownEta ?? b.originalEta,
-      durationMin: _int(r['durationMin'] ?? r['estimatedDurationMin']) ??
-          (durFromServices > 0 ? durFromServices : 30),
-      priceCents: _int(r['priceCents'] ?? r['amountCents'] ?? r['price']) ??
-          priceFromServices,
+      eta: b.eta ?? _date(r['eta']) ?? b.lastShownEta ?? b.originalEta,
+      durationMin: b.estimatedDurationMin ??
+          _int(r['durationMin']) ??
+          (durFromServices > 0 ? durFromServices : (b.durationMin ?? 30)),
+      priceCents: b.priceCents ?? _int(r['priceCents']) ?? priceFromServices,
       postponementUsed: b.postponementUsed,
       actualStart: b.actualStart,
       actualEnd: b.actualEnd,
-      calledAt: _date(r['calledAt']),
+      calledAt: b.calledAt ?? _date(r['calledAt']),
       walkIn: b.walkIn || b.source == sa.BookingSource.barber,
       position: b.queuePosition ?? 0,
-      pastClosing: r['pastClosing'] == true,
-      closingDecided: r['closingDecision'] != null || r['serveLate'] == true,
+      pastClosing: pastClosing ?? r['pastClosing'] == true,
+      closingDecided: b.serveLate || r['closingDecision'] != null,
       payment: payStatus is String ? _payment(payStatus) : null,
       source: b.source,
       createdAt: b.createdAt,
@@ -202,6 +211,12 @@ class QueueEntry {
         source: source,
         walkIn: walkIn,
         createdAt: createdAt,
+        customerName: name,
+        customerPhone: phone,
+        priceCents: priceCents,
+        estimatedDurationMin: durationMin,
+        eta: eta,
+        calledAt: calledAt,
       );
 
   /// الحقول الإضافية للحفظ المحلي بجانب `sa.Booking`.
@@ -299,24 +314,23 @@ class ImpactPreview {
   List<ImpactEntry> get pastClosing => items.where((i) => i.pastClosing).toList();
   List<ImpactEntry> get notified => items.where((i) => i.notify).toList();
 
-  /// تحليل استجابة `POST /staff/impact`: `{changes[], pastClosing[], newDurationMin,
-  /// newPriceCents, workEnd}` (مع قبول أشكال بديلة احتياطًا).
-  factory ImpactPreview.fromJson(Object? json) {
-    final list = json is List
-        ? json
-        : (json is Map
-            ? (json['changes'] ?? json['items'] ?? json['affected'] ?? const [])
-            : const []);
-    final items = <ImpactEntry>[];
-    for (final e in (list as List)) {
-      if (e is Map) items.add(ImpactEntry.fromJson(Map<String, dynamic>.from(e)));
-    }
-    // من سيتجاوز الإغلاق دون أن يتغيّر وقته (ق24) — يُضاف ليُتخذ قرار بشأنه.
-    final past = json is Map && json['pastClosing'] is List ? json['pastClosing'] as List : const [];
-    for (final p in past) {
-      if (p is! Map) continue;
-      final id = (p['bookingId'] ?? '').toString();
-      final idx = items.indexWhere((i) => i.bookingId == id);
+  /// من استجابة `POST /staff/impact` (`sa.StaffImpact`): المتأثرون بالتعديل
+  /// + من سيتجاوز الإغلاق دون أن يتغيّر وقته (ق24) ليُتخذ قرار بشأنه.
+  factory ImpactPreview.fromImpact(sa.StaffImpact impact) {
+    final items = [
+      for (final c in impact.changes)
+        ImpactEntry(
+          bookingId: c.bookingId,
+          name: c.customerName ?? 'زبون',
+          from: c.before,
+          to: c.after,
+          deltaMin: c.deltaMin,
+          notify: c.notify,
+          pastClosing: c.pastClosing,
+        ),
+    ];
+    for (final p in impact.pastClosing) {
+      final idx = items.indexWhere((i) => i.bookingId == p.bookingId);
       if (idx >= 0) {
         final i = items[idx];
         items[idx] = ImpactEntry(
@@ -330,9 +344,9 @@ class ImpactPreview {
         );
       } else {
         items.add(ImpactEntry(
-          bookingId: id,
-          name: (p['customerName'] ?? 'زبون').toString(),
-          to: _date(p['end']),
+          bookingId: p.bookingId,
+          name: p.customerName ?? 'زبون',
+          to: p.end,
           deltaMin: 0,
           notify: false,
           pastClosing: true,
@@ -341,8 +355,8 @@ class ImpactPreview {
     }
     return ImpactPreview(
       items: items,
-      newDurationMin: json is Map ? _int(json['newDurationMin'] ?? json['durationMin']) : null,
-      newPriceCents: json is Map ? _int(json['newPriceCents'] ?? json['priceCents']) : null,
+      newDurationMin: impact.newDurationMin,
+      newPriceCents: impact.newPriceCents,
     );
   }
 }
@@ -364,20 +378,4 @@ class ImpactEntry {
   final int deltaMin;
   final bool notify;
   final bool pastClosing;
-
-  factory ImpactEntry.fromJson(Map<String, dynamic> j) {
-    final from = _date(j['from'] ?? j['oldEta'] ?? j['before']);
-    final to = _date(j['to'] ?? j['newEta'] ?? j['after']);
-    final delta = _int(j['deltaMin'] ?? j['delta']) ??
-        (from != null && to != null ? to.difference(from).inMinutes : 0);
-    return ImpactEntry(
-      bookingId: (j['bookingId'] ?? j['id'] ?? '').toString(),
-      name: (j['customerName'] ?? j['name'] ?? 'زبون').toString(),
-      from: from,
-      to: to,
-      deltaMin: delta,
-      notify: j['notify'] == true || delta.abs() > 30,
-      pastClosing: j['pastClosing'] == true,
-    );
-  }
 }

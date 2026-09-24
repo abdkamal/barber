@@ -28,7 +28,7 @@ ApiClient _clientWith(
       accessToken: 'a',
       refreshToken: 'r',
       role: UserRole.barber,
-      salonCode: 'ABC123',
+      salon: SalonInfo(code: 'ABC123'),
     ),
     rememberMe: false,
   );

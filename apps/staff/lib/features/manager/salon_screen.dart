@@ -152,13 +152,16 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
           : name.endsWith('.webp')
               ? 'image/webp'
               : 'image/jpeg';
-      final raw = ref.read(servicesProvider).raw;
+      final api = ref.read(servicesProvider).api;
       if (logo) {
-        final r = await raw.uploadLogo(bytes, file.name, type);
-        setState(() => _logo = str(r, ['logo']));
+        final r = await api.uploadManagerLogo(bytes: bytes, filename: file.name, contentType: type);
+        setState(() => _logo = str(r, ['logo', 'path']));
       } else {
-        final r = await raw.uploadPhoto(bytes, file.name, type);
-        if (r is Map) setState(() => _photos = [..._photos, Map<String, dynamic>.from(r)]);
+        final r = await api.uploadManagerPhoto(bytes: bytes, filename: file.name, contentType: type);
+        setState(() => _photos = [
+              ..._photos,
+              {'id': r.id, 'url': r.url ?? r.path, 'position': r.position},
+            ]);
       }
       if (mounted) toast(context, 'رُفعت الصورة');
     } catch (e) {
@@ -178,7 +181,8 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
     }
   }
 
-  /// المسار المخزَّن `salonId/file` ← `/v1/media/{code}/{file}` (للصالونات المفعّلة فقط).
+  /// رابط `/v1/media/{code}/{file}` (أو مسار مخزَّن `salonId/file`) ← رابط كامل
+  /// (يُعرض للصالونات المفعّلة فقط).
   String _url(String path) => mediaUrl(path, ref.read(authProvider).salon?.code ?? '');
 
   static String? _nullIfEmpty(String s) => s.trim().isEmpty ? null : s.trim();

@@ -1,0 +1,17 @@
+name: saloni_e2e
+description: >
+  End-to-end test: the real Saloni server driven by the real Dart ApiClient and
+  StaffSyncEngine (packages/saloni_api). Run with ./run.sh.
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  saloni_api:
+    path: ../packages/saloni_api
+  http: ^1.2.2
+
+dev_dependencies:
+  test: ^1.25.8
+  lints: ^4.0.0

@@ -23,7 +23,7 @@ BookingStatus uiStatus(sa.BookingStatus s) => switch (s) {
       sa.BookingStatus.called => BookingStatus.called,
       sa.BookingStatus.inService => BookingStatus.inService,
       sa.BookingStatus.done => BookingStatus.done,
-      sa.BookingStatus.cancelled => BookingStatus.cancelled,
+      sa.BookingStatus.cancelled || sa.BookingStatus.expired => BookingStatus.cancelled,
       sa.BookingStatus.noShow => BookingStatus.noShow,
       sa.BookingStatus.offered => BookingStatus.offered,
     };

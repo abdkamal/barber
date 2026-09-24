@@ -95,8 +95,8 @@ class _CatalogEditorState extends ConsumerState<_CatalogEditor> {
       }
       final photo = _photo;
       if (photo != null && id.isNotEmpty) {
-        await services.raw.uploadCatalogPhoto(
-            id, photo.bytes, photo.name, photo.type);
+        await services.api.uploadManagerCatalogPhoto(id,
+            bytes: photo.bytes, filename: photo.name, contentType: photo.type);
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {

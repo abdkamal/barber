@@ -7,14 +7,9 @@ import 'package:saloni_api/saloni_api.dart';
 
 import '../config.dart';
 
-/// رسالة FCM مبسطة (api.md: `{type, bookingId, title, body}`).
-class PushMessage {
-  const PushMessage({required this.type, this.bookingId, this.title, this.body});
-  final String type;
-  final String? bookingId;
-  final String? title;
-  final String? body;
-}
+/// رسالة FCM (api.md: `{type, bookingId, title, body}`) بنوع مصنّف من
+/// `saloni_api` (يشمل `transferred` و`base_duration_suspect`).
+typedef PushMessage = PushNotification;
 
 /// إشعارات Firebase — خلف العلم `FCM_ENABLED` (يتطلب google-services.json).
 /// بدونه يعمل التطبيق كاملًا، وتبقى المزامنة الدورية والتنبيهات داخل التطبيق.
@@ -58,11 +53,10 @@ class FirebasePushService implements PushService {
       if (!_listening) {
         _listening = true;
         FirebaseMessaging.onMessage.listen((m) {
-          _controller.add(PushMessage(
-            type: m.data['type']?.toString() ?? '',
-            bookingId: m.data['bookingId']?.toString(),
-            title: m.notification?.title ?? m.data['title']?.toString(),
-            body: m.notification?.body ?? m.data['body']?.toString(),
+          _controller.add(PushNotification.fromData(
+            m.data,
+            title: m.notification?.title,
+            body: m.notification?.body,
           ));
         });
         fm.onTokenRefresh.listen((t) {

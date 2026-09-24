@@ -25,7 +25,7 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  late Future<List<dynamic>> _future;
+  late Future<List<api.HistoryVisit>> _future;
 
   @override
   void initState() {
@@ -40,7 +40,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('السجل')),
       body: SafeArea(
-        child: FutureBuilder<List<dynamic>>(
+        child: FutureBuilder<List<api.HistoryVisit>>(
           future: _future,
           builder: (context, snap) {
             if (snap.connectionState != ConnectionState.done) {
@@ -66,7 +66,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               padding: const EdgeInsets.all(16),
               itemCount: items.length,
               separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, i) => _HistoryTile(raw: items[i] as Map<String, dynamic>, currency: widget.currency),
+              itemBuilder: (context, i) => _HistoryTile(visit: items[i], currency: widget.currency),
             );
           },
         ),
@@ -76,21 +76,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
 }
 
 class _HistoryTile extends StatelessWidget {
-  const _HistoryTile({required this.raw, required this.currency});
+  const _HistoryTile({required this.visit, required this.currency});
 
-  final Map<String, dynamic> raw;
+  final api.HistoryVisit visit;
   final String currency;
 
   @override
   Widget build(BuildContext context) {
-    final barber = raw['barberName'] as String? ?? raw['barber'] as String? ?? '—';
-    final services = (raw['serviceNames'] as List?)?.join('، ') ?? raw['services'] as String? ?? '';
-    final priceCents = raw['priceCents'] as int? ?? raw['amountCents'] as int? ?? 0;
-    final dateStr = raw['date'] as String? ?? raw['createdAt'] as String?;
-    final paymentStatusWire = raw['paymentStatus'] as String?;
-    final ui.BookingStatus? payTone = paymentStatusWire == null
-        ? null
-        : mapPaymentStatus(api.PaymentStatus.fromWire(paymentStatusWire));
+    final b = visit.booking;
+    final barber = visit.barberName.isEmpty ? '—' : visit.barberName;
+    final services = b.services.map((s) => s.name).join('، ');
+    final priceCents = visit.payment?.amountCents ?? b.priceCents ?? 0;
+    final when = b.actualStart ?? b.eta ?? b.createdAt;
+    final dateStr = when == null ? (b.workDate ?? '') : formatVisitDate(when);
+    // حالة الدفع لما اكتملت خدمته، وإلا حالة الزيارة نفسها (ملغى، لم يحضر…).
+    final ui.BookingStatus tone = visit.payment != null
+        ? mapPaymentStatus(visit.payment!.status)
+        : mapBookingStatus(b.status);
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -105,8 +107,12 @@ class _HistoryTile extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(barber, style: Theme.of(context).textTheme.titleSmall),
-              if (payTone != null) ui.StatusBadge(status: payTone, small: true),
+              Expanded(
+                child: Text(barber,
+                    style: Theme.of(context).textTheme.titleSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(width: 8),
+              ui.StatusBadge(status: tone, small: true),
             ],
           ),
           if (services.isNotEmpty) ...[
@@ -117,7 +123,8 @@ class _HistoryTile extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(dateStr ?? '', style: Theme.of(context).textTheme.bodySmall),
+              Flexible(child: Text(dateStr, style: Theme.of(context).textTheme.bodySmall)),
+              const SizedBox(width: 8),
               Text(formatPrice(priceCents, currency)),
             ],
           ),

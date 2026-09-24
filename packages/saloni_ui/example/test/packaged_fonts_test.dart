@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -59,8 +60,17 @@ void main() {
         expect(data.lengthInBytes, greaterThan(10000), reason: a);
       }
     }
-    final licence = await rootBundle
-        .loadString('packages/saloni_ui/assets/fonts/licenses/OFL-ElMessiri.txt');
-    expect(licence, contains('SIL OPEN FONT LICENSE'));
+    for (final key in saloniFontLicenseAssets.values) {
+      expect(await rootBundle.loadString(key), contains('SIL OPEN FONT LICENSE'), reason: key);
+    }
+  });
+
+  test('registerSaloniFontLicenses exposes the OFL texts on the licence page', () async {
+    registerSaloniFontLicenses();
+    final packages = <String>{};
+    await for (final entry in LicenseRegistry.licenses) {
+      packages.addAll(entry.packages);
+    }
+    expect(packages, containsAll([SaloniFonts.display, SaloniFonts.text, SaloniFonts.mono]));
   });
 }

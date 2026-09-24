@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:saloni_api/saloni_api.dart' show serverWeekday;
 import 'package:saloni_ui/saloni_ui.dart';
 
 import '../../core/format.dart';
-import '../../core/raw_api.dart';
 import '../../state/app_services.dart';
 import '../common/shells.dart';
 import '../common/ui.dart';
@@ -112,7 +112,7 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
       return;
     }
     await _run(() async {
-      await ref.read(servicesProvider).raw.putSchedule(
+      await ref.read(servicesProvider).api.putManagerSchedule(
             staffId: who,
             weekday: day,
             opensAt: wireTime(from),
@@ -200,7 +200,7 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
     DateTime at(int m) => DateTime(date.year, date.month, date.day, m ~/ 60, m % 60);
     final end = to > from ? at(to) : at(to).add(const Duration(days: 1));
     await _run(() async {
-      await ref.read(servicesProvider).api.upsertManagerBreak({
+      await ref.read(servicesProvider).api.createManagerBreak({
         'staffId': who,
         'type': type,
         if (daily) ...{'startTime': wireTime(from), 'endTime': wireTime(to)},
@@ -258,7 +258,7 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
     });
     if (ok != true || who == null) return;
     await _run(() async {
-      await ref.read(servicesProvider).api.upsertManagerAbsence({
+      await ref.read(servicesProvider).api.createManagerAbsence({
         'staffId': who,
         'workDate': _date(date),
         'reason': reason.text.trim().isEmpty ? null : reason.text.trim(),
@@ -268,7 +268,7 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final raw = ref.read(servicesProvider).raw;
+    final api = ref.read(servicesProvider).api;
     return DetailScaffold(
       title: 'الدوام والاستراحات',
       subtitle: 'ساعات العمل، الاستراحات، الإجازات',
@@ -340,7 +340,7 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
                   ),
                   IconButton(
                     tooltip: 'حذف',
-                    onPressed: () => _run(() async => raw.deleteBreak(str(b, ['id'])), 'حُذفت'),
+                    onPressed: () => _run(() async => api.deleteManagerBreak(str(b, ['id'])), 'حُذفت'),
                     icon: SaloniIcon(SaloniIconName.x, color: c.inkMuted),
                   ),
                 ]),
@@ -368,7 +368,7 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
                   ),
                   IconButton(
                     tooltip: 'حذف',
-                    onPressed: () => _run(() async => raw.deleteAbsence(str(a, ['id'])), 'حُذفت'),
+                    onPressed: () => _run(() async => api.deleteManagerAbsence(str(a, ['id'])), 'حُذفت'),
                     icon: SaloniIcon(SaloniIconName.x, color: c.inkMuted),
                   ),
                 ]),

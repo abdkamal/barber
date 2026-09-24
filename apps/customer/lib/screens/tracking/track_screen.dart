@@ -17,6 +17,7 @@ class TrackScreen extends StatefulWidget {
     this.externalRefresh,
     required this.onChangeTime,
     required this.onCancel,
+    this.onNoActiveBooking,
     this.pollInterval = const Duration(seconds: 30),
   });
 
@@ -26,6 +27,9 @@ class TrackScreen extends StatefulWidget {
   final Stream<void>? externalRefresh;
   final void Function(core.CurrentBooking current) onChangeTime;
   final void Function(core.CurrentBooking current) onCancel;
+
+  /// لم يعد هناك حجز نشط (انتهت الخدمة، أُلغي…) — يعود المضيف لشاشة الحجز.
+  final VoidCallback? onNoActiveBooking;
   final Duration pollInterval;
 
   @override
@@ -71,6 +75,10 @@ class _TrackScreenState extends State<TrackScreen> with WidgetsBindingObserver {
         _loading = false;
         _error = null;
       });
+      if (current == null) {
+        widget.onNoActiveBooking?.call();
+        return;
+      }
       if (_lastMarkedEta != current.eta) {
         _lastMarkedEta = current.eta;
         // «كل عرض لشاشة المتابعة يُبلغ التطبيق السيرفر بما عرضه» — design.md §5.9.
@@ -125,8 +133,9 @@ class _Loaded extends StatelessWidget {
     final booking = current.booking;
     final status = mapBookingStatus(booking.status);
     final changed = current.originalEta != current.eta;
-    final canModify = booking.status == core.BookingStatus.waiting ||
-        booking.status == core.BookingStatus.offered;
+    // تعديل الوقت قبل الاستدعاء فقط؛ الإلغاء قبل بدء الخدمة (ق29).
+    final canChangeTime = booking.status == core.BookingStatus.waiting;
+    final canModify = canChangeTime || booking.status == core.BookingStatus.called;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -138,6 +147,14 @@ class _Loaded extends StatelessWidget {
               tone: ui.SaloniBannerTone.warning,
               title: 'اقترب دورك — توجّه إلى الصالون الآن',
               body: 'مكانك محفوظ حتى تصل.',
+            ),
+          ),
+        if (current.dayState == core.BarberDayState.absentToday)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ui.SaloniBanner(
+              tone: ui.SaloniBannerTone.warning,
+              body: 'حلاقك لن يعمل اليوم — سيتواصل معك الصالون أو ينقل حجزك لحلاق آخر.',
             ),
           ),
         if (!current.live)
@@ -153,8 +170,8 @@ class _Loaded extends StatelessWidget {
           ampm: formatAmPm(current.eta),
           status: status,
           requested: booking.kind == core.BookingKind.requested,
-          barber: 'حلاقك',
-          services: '${booking.serviceIds.length} خدمة',
+          barber: current.barber?.name ?? 'حلاقك',
+          services: booking.services.isEmpty ? '${booking.serviceIds.length} خدمة' : booking.serviceNames,
           updated: formatAgo(current.lastUpdateAt),
           originalEta: changed ? '${formatHourMinute(current.originalEta)} ${formatAmPm(current.originalEta)}' : null,
           reason: changed ? current.lastChangeReason : null,
@@ -172,14 +189,16 @@ class _Loaded extends StatelessWidget {
           const SizedBox(height: 16),
           Row(
             children: [
-              Expanded(
-                child: ui.SaloniButton(
-                  label: 'تعديل الوقت',
-                  variant: ui.SaloniButtonVariant.secondary,
-                  onPressed: onChangeTime,
+              if (canChangeTime) ...[
+                Expanded(
+                  child: ui.SaloniButton(
+                    label: 'تعديل الوقت',
+                    variant: ui.SaloniButtonVariant.secondary,
+                    onPressed: onChangeTime,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
+                const SizedBox(width: 10),
+              ],
               Expanded(
                 child: ui.SaloniButton(
                   label: 'إلغاء الحجز',

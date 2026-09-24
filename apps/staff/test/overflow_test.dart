@@ -15,14 +15,9 @@ void main() {
       ..booking(id: 'b4', name: 'ريان', position: 3);
     s.closingWarnings = ['b4'];
     s.managerQueues = [
-      {
-        'barberId': 'x',
-        'barberName': 'خالد الحربي',
-        'dayState': 'disconnected',
-        'queue': [
-          {'id': 'q1', 'customerName': 'فهد القحطاني الطويل الاسم', 'status': 'called', 'services': [{'name': 'شعر ولحية'}], 'estimatedDurationMin': 45},
-        ],
-      },
+      s.queueBarber(id: 'x', name: 'خالد الحربي', state: 'disconnected', queue: [
+        s.bookingJson(id: 'q1', name: 'فهد القحطاني الطويل الاسم', status: 'called', serviceIds: ['s-both'], durationMin: 45),
+      ]),
     ];
     return s;
   }

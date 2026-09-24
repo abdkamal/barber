@@ -11,6 +11,7 @@ String breakKindAr(sa.BreakKind k) => switch (k) {
       sa.BreakKind.rest => 'راحة',
       sa.BreakKind.prayer => 'صلاة',
       sa.BreakKind.emergency => 'طارئة',
+      sa.BreakKind.walkInOnly => 'حاضرون فقط',
     };
 
 /// استراحاتي: الاستراحات المجدولة، الاستراحة الطارئة، «لن أعمل اليوم» (ق26).

@@ -15,6 +15,7 @@ ui.BookingStatus mapBookingStatus(api.BookingStatus status) {
     case api.BookingStatus.done:
       return ui.BookingStatus.done;
     case api.BookingStatus.cancelled:
+    case api.BookingStatus.expired:
       return ui.BookingStatus.cancelled;
     case api.BookingStatus.noShow:
       return ui.BookingStatus.noShow;

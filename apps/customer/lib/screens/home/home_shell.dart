@@ -139,21 +139,18 @@ class _BookingOrTrackingTabState extends State<_BookingOrTrackingTab> {
   }
 
   Future<void> _check() async {
+    bool active;
     try {
-      await widget.api.getCurrentBooking();
-      if (mounted) {
-        setState(() {
-          _hasActive = true;
-          _loading = false;
-        });
-      }
+      active = await widget.api.getCurrentBooking() != null;
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _hasActive = false;
-          _loading = false;
-        });
-      }
+      // تعذّر الاتصال: شاشة المتابعة تعرض الخطأ وزر إعادة المحاولة.
+      active = true;
+    }
+    if (mounted) {
+      setState(() {
+        _hasActive = active;
+        _loading = false;
+      });
     }
   }
 
@@ -175,6 +172,9 @@ class _BookingOrTrackingTabState extends State<_BookingOrTrackingTab> {
     return TrackScreen(
       api: widget.api,
       externalRefresh: widget.fcmMessages,
+      onNoActiveBooking: () {
+        if (mounted) setState(() => _hasActive = false);
+      },
       onChangeTime: (current) async {
         final booking = await Navigator.of(context).push<api.Booking>(
           MaterialPageRoute(
@@ -191,7 +191,7 @@ class _BookingOrTrackingTabState extends State<_BookingOrTrackingTab> {
         context: context,
         api: widget.api,
         bookingId: current.booking.id,
-        barberName: 'حلاقك',
+        barberName: current.barber?.name ?? 'حلاقك',
         eta: current.eta,
         onCancelled: () {
           widget.onBookingChanged();

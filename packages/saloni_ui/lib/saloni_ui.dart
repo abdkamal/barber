@@ -8,6 +8,7 @@ export 'src/tokens/saloni_shadows.dart';
 export 'src/tokens/saloni_sizes.dart';
 export 'src/tokens/saloni_spacing.dart';
 export 'src/tokens/saloni_typography.dart';
+export 'src/tokens/font_licenses.dart';
 
 // Theme
 export 'src/theme/saloni_theme.dart';

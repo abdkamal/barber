@@ -10,7 +10,7 @@ Session _session({String access = 'access-1', String refresh = 'refresh-1'}) =>
       accessToken: access,
       refreshToken: refresh,
       role: UserRole.barber,
-      salonCode: 'ABC123',
+      salon: SalonInfo(code: 'ABC123'),
     );
 
 /// `http.Response()` يفترض ترميز latin1 افتراضيًا إن لم يُحدَّد، فيفشل مع

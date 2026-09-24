@@ -8,17 +8,21 @@ class FakeCustomerApi implements CustomerApi {
     SalonPublicProfile? profile,
     Map<String, dynamic>? today,
     CurrentBooking? currentBooking,
-    List<dynamic>? history,
-  })  : salonProfile = profile ?? _defaultProfile,
-        customerToday = today ?? _defaultToday,
+    List<HistoryVisit>? history,
+  })  : salonProfile = profile ?? SalonPublicProfile.fromJson(defaultProfileJson),
+        // بالشكل الذي يعيده السيرفر فعلًا (`GET /customer/today`).
+        customerToday = CustomerToday.fromJson(today ?? defaultTodayJson()),
         // ignore: prefer_initializing_formals — القيمة الافتراضية `null` معلنة صراحة هنا لوضوحها.
         _currentBooking = currentBooking,
         historyItems = history ?? [];
 
   SalonPublicProfile salonProfile;
-  Map<String, dynamic> customerToday;
+  CustomerToday customerToday;
   CurrentBooking? _currentBooking;
-  List<dynamic> historyItems;
+  List<HistoryVisit> historyItems;
+
+  /// خطأ يُرمى من `changeBookingTime` (مثل `409 SLOT_UNAVAILABLE` مع عرض).
+  Object? nextChangeTimeError;
 
   /// نتيجة `getQuote` القادمة — يضبطها الاختبار قبل الاستدعاء.
   Quote? nextQuote;
@@ -41,6 +45,9 @@ class FakeCustomerApi implements CustomerApi {
 
   @override
   Future<SalonPublicProfile> getSalonProfile(String code) async => salonProfile;
+
+  @override
+  String? mediaUrl(String? url) => url == null ? null : 'http://test.local$url';
 
   @override
   Future<Session> registerCustomer({
@@ -71,7 +78,7 @@ class FakeCustomerApi implements CustomerApi {
   }
 
   @override
-  Future<Map<String, dynamic>> getCustomerToday() async => customerToday;
+  Future<CustomerToday> getCustomerToday() async => customerToday;
 
   @override
   Future<Quote> getQuote({
@@ -109,11 +116,9 @@ class FakeCustomerApi implements CustomerApi {
   }
 
   @override
-  Future<CurrentBooking> getCurrentBooking() async {
+  Future<CurrentBooking?> getCurrentBooking() async {
     if (nextCurrentBookingError != null) throw nextCurrentBookingError!;
-    final b = _currentBooking;
-    if (b == null) throw const ApiError(code: 'NO_ACTIVE_BOOKING', message: 'لا يوجد حجز نشط');
-    return b;
+    return _currentBooking;
   }
 
   void setCurrentBooking(CurrentBooking? booking) => _currentBooking = booking;
@@ -130,8 +135,10 @@ class FakeCustomerApi implements CustomerApi {
     required BookingKind kind,
     DateTime? requestedAt,
     String? idempotencyKey,
-  }) async =>
-      nextChangedBooking ?? _defaultBooking;
+  }) async {
+    if (nextChangeTimeError != null) throw nextChangeTimeError!;
+    return nextChangedBooking ?? _defaultBooking;
+  }
 
   @override
   Future<void> cancelBooking(String bookingId, {String? idempotencyKey}) async {
@@ -139,7 +146,7 @@ class FakeCustomerApi implements CustomerApi {
   }
 
   @override
-  Future<List<dynamic>> getCustomerHistory() async => historyItems;
+  Future<List<HistoryVisit>> getCustomerHistory() async => historyItems;
 
   @override
   Future<void> registerDevice({
@@ -158,62 +165,97 @@ class FakeCustomerApi implements CustomerApi {
         accessToken: 'access',
         refreshToken: 'refresh',
         role: UserRole.customer,
-        salonCode: salonCode,
+        salon: SalonInfo(code: salonCode, name: 'صالون الراحة', status: 'active', currency: 'SAR'),
+        account: const AccountInfo(id: 'c-1', name: 'سالم', status: 'active'),
       );
 }
 
-final _defaultProfile = SalonPublicProfile(
-  code: 'RAHA-27',
-  name: 'صالون الراحة',
-  bio: 'صالون رجالي في حي النرجس.',
-  address: 'الرياض — حي النرجس',
-  currency: 'ر.س',
-  timezone: 'Asia/Riyadh',
-  contact: const SalonContactInfo(phone: '+966110000000', whatsapp: '+966550000000'),
-  catalog: [
-    const CatalogItem(
-      id: 'svc-1',
-      type: CatalogItemType.service,
-      name: 'حلاقة شعر',
-      priceCents: 4000,
-      order: 0,
-      serviceId: 'svc-1',
-    ),
-    const CatalogItem(
-      id: 'prod-1',
-      type: CatalogItemType.product,
-      name: 'واكس تصفيف',
-      priceCents: 4500,
-      order: 1,
-    ),
+/// ملف الصالون العام بشكل `GET /salons/{code}`.
+final defaultProfileJson = <String, dynamic>{
+  'code': 'RAHA-27',
+  'name': 'صالون الراحة',
+  'timezone': 'Asia/Riyadh',
+  'currency': 'ر.س',
+  'about': 'صالون رجالي في حي النرجس.',
+  'logo': null,
+  'address': 'الرياض — حي النرجس',
+  'location': null,
+  'contact': {
+    'phone': '+966110000000',
+    'whatsapp': '+966550000000',
+    'social': [
+      {'platform': 'instagram', 'url': 'https://instagram.com/raha'}
+    ],
+  },
+  'photos': [],
+  'hours': [
+    {'weekday': 3, 'opensAt': '10:00', 'closesAt': '23:00', 'crossesMidnight': false},
   ],
-  workingHours: const [
-    WorkingHoursEntry(weekday: 3, openMinutes: 600, closeMinutes: 1380),
-  ],
-);
-
-final _defaultToday = <String, dynamic>{
+  'openNow': true,
   'services': [
-    {'id': 'svc-1', 'name': 'حلاقة شعر', 'baseDurationMin': 38, 'priceCents': 4000},
-    {'id': 'svc-2', 'name': 'شعر ولحية', 'baseDurationMin': 45, 'priceCents': 6000},
+    {'id': 'svc-1', 'name': 'حلاقة شعر', 'durationMin': 30, 'price': 4000},
   ],
-  'barbers': [
+  'catalog': [
     {
-      'id': 'b-1',
-      'name': 'خالد الحربي',
-      'dayState': 'connected',
-      'nextAvailableStart': DateTime.now().toUtc().add(const Duration(minutes: 25)).toIso8601String(),
-      'queueLength': 2,
+      'id': 'svc-1',
+      'kind': 'service',
+      'name': 'حلاقة شعر',
+      'description': null,
+      'features': [],
+      'price': 4000,
+      'photo': null,
+      'serviceId': 'svc-1',
     },
     {
-      'id': 'b-2',
-      'name': 'سعد العمري',
-      'dayState': 'absent_today',
-      'nextAvailableStart': null,
-      'queueLength': 0,
+      'id': 'prod-1',
+      'kind': 'product',
+      'name': 'واكس تصفيف',
+      'description': null,
+      'features': [],
+      'price': 4500,
+      'photo': null,
+      'serviceId': null,
     },
   ],
 };
+
+/// `GET /customer/today` بالشكل الذي يرسله السيرفر.
+Map<String, dynamic> defaultTodayJson({String accountStatus = 'active'}) {
+  final now = DateTime.now().toUtc();
+  return {
+    'serverTime': now.toIso8601String(),
+    'accountStatus': accountStatus,
+    'currency': 'SAR',
+    'services': [
+      {'id': 'svc-1', 'name': 'حلاقة شعر', 'baseDurationMin': 38, 'priceCents': 4000, 'active': true},
+      {'id': 'svc-2', 'name': 'شعر ولحية', 'baseDurationMin': 45, 'priceCents': 6000, 'active': true},
+    ],
+    'barbers': [
+      {
+        'id': 'b-1',
+        'name': 'خالد الحربي',
+        'photoUrl': null,
+        'dayState': 'connected',
+        'nextAvailableStart': now.add(const Duration(minutes: 25)).toIso8601String(),
+        'queueLength': 2,
+        'accepting': true,
+        'workStart': now.subtract(const Duration(hours: 2)).toIso8601String(),
+        'workEnd': now.add(const Duration(hours: 8)).toIso8601String(),
+      },
+      {
+        'id': 'b-2',
+        'name': 'سعد العمري',
+        'photoUrl': null,
+        'dayState': 'absent_today',
+        'nextAvailableStart': null,
+        'queueLength': 0,
+        'accepting': false,
+        'workStart': now.subtract(const Duration(hours: 2)).toIso8601String(),
+        'workEnd': now.add(const Duration(hours: 8)).toIso8601String(),
+      },
+    ],
+  };
+}
 
 final _defaultBooking = Booking(
   id: 'bk-1',

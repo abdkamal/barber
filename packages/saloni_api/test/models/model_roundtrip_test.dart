@@ -3,38 +3,73 @@ import 'package:test/test.dart';
 
 void main() {
   group('model JSON round-trips', () {
-    test('SalonPublicProfile', () {
-      final profile = SalonPublicProfile(
-        code: 'ABC123',
-        name: 'صالون الأمانة',
-        logoUrl: 'https://x/logo.png',
-        bio: 'أفضل صالون',
-        address: 'الرياض',
-        latitude: 24.7,
-        longitude: 46.6,
-        currency: 'SAR',
-        timezone: 'Asia/Riyadh',
-        contact: const SalonContactInfo(phone: '0500000000', socialLinks: ['https://x.com']),
-        photos: const [SalonPhoto(url: 'https://x/1.png', order: 0)],
-        workingHours: const [
-          WorkingHoursEntry(weekday: 0, openMinutes: 540, closeMinutes: 1320),
+    test('SalonPublicProfile parses the server shape', () {
+      final json = {
+        'code': 'ABC123',
+        'name': 'صالون الأمانة',
+        'timezone': 'Asia/Riyadh',
+        'currency': 'SAR',
+        'about': 'أفضل صالون',
+        'logo': '/v1/media/ABC123/logo.webp',
+        'address': 'الرياض',
+        'location': {'lat': 24.7, 'lng': 46.6},
+        'contact': {
+          'phone': '0500000000',
+          'whatsapp': null,
+          'social': [
+            {'platform': 'instagram', 'url': 'https://instagram.com/x'}
+          ],
+        },
+        'photos': [
+          {'id': 'p1', 'url': '/v1/media/ABC123/1.webp', 'position': 0}
         ],
-        catalog: const [
-          CatalogItem(
-            id: 'c1',
-            type: CatalogItemType.service,
-            name: 'قص شعر',
-            priceCents: 5000,
-            order: 0,
-            serviceId: 's1',
-          ),
+        'hours': [
+          {'weekday': 0, 'opensAt': '09:00', 'closesAt': '22:00', 'crossesMidnight': false},
+          {'weekday': 5, 'opensAt': '16:00', 'closesAt': '01:00', 'crossesMidnight': true},
         ],
-      );
-      final decoded = SalonPublicProfile.fromJson(profile.toJson());
-      expect(decoded.code, profile.code);
-      expect(decoded.catalog.single.name, 'قص شعر');
-      expect(decoded.workingHours.single.closeMinutes, 1320);
-      expect(decoded.contact.socialLinks, ['https://x.com']);
+        'openNow': true,
+        'services': [
+          {'id': 's1', 'name': 'قص', 'durationMin': 30, 'price': 5000}
+        ],
+        'catalog': [
+          {
+            'id': 'c1',
+            'kind': 'service',
+            'name': 'قص شعر',
+            'description': null,
+            'features': ['غسيل'],
+            'price': 5000,
+            'photo': null,
+            'serviceId': 's1',
+          },
+          {
+            'id': 'c2',
+            'kind': 'product',
+            'name': 'زيت',
+            'features': [],
+            'price': null,
+            'photo': '/v1/media/ABC123/2.webp',
+            'serviceId': null,
+          },
+        ],
+      };
+      final profile = SalonPublicProfile.fromJson(json);
+      expect(profile.about, 'أفضل صالون');
+      expect(profile.logoUrl, '/v1/media/ABC123/logo.webp');
+      expect(profile.latitude, 24.7);
+      expect(profile.contact.socialLinks.single.platform, 'instagram');
+      expect(profile.photos.single.position, 0);
+      expect(profile.hours.first.closeMinutes, 22 * 60);
+      expect(profile.hours.last.closeMinutes, 25 * 60);
+      expect(profile.hours.first.dartWeekday, DateTime.sunday);
+      expect(profile.openNow, isTrue);
+      expect(profile.services.single.baseDurationMin, 30);
+      expect(profile.services.single.priceCents, 5000);
+      expect(profile.catalog.first.type, CatalogItemType.service);
+      expect(profile.catalog.last.priceCents, isNull);
+      final again = SalonPublicProfile.fromJson(profile.toJson());
+      expect(again.catalog.map((c) => c.name), ['قص شعر', 'زيت']);
+      expect(again.hours.last.crossesMidnight, isTrue);
     });
 
     test('Session', () {
@@ -42,7 +77,7 @@ void main() {
         accessToken: 'a',
         refreshToken: 'r',
         role: UserRole.barber,
-        salonCode: 'ABC123',
+        salon: SalonInfo(code: 'ABC123'),
       );
       final decoded = Session.fromJson(session.toJson());
       expect(decoded.role, UserRole.barber);
