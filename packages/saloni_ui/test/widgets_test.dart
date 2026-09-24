@@ -163,7 +163,7 @@ void main() {
     await tester.pumpWidget(
       _harness(
         const Column(
-          children: const [
+          children: [
             BarberOption(fastest: true, nextAt: '10:40', wait: 'الآن'),
             BarberOption(name: 'خالد', nextAt: '11:00', wait: 'خلال 20 د'),
             BarberOption(name: 'سعيد', unavailable: true, reason: 'إجازة'),
@@ -314,7 +314,7 @@ void main() {
     await tester.pumpWidget(
       _harness(
         const Column(
-          children: const [
+          children: [
             SaloniBanner(title: 'معلومة', body: 'نص المعلومة'),
             SaloniBanner(tone: SaloniBannerTone.success, title: 'نجاح'),
             SaloniBanner(tone: SaloniBannerTone.warning, title: 'تنبيه'),
@@ -330,7 +330,7 @@ void main() {
     await tester.pumpWidget(
       _harness(
         const Column(
-          children: const [
+          children: [
             ConnectionBar(),
             ConnectionBar(state: SaloniConnectionState.syncing, pending: 2),
             ConnectionBar(
@@ -416,7 +416,7 @@ void main() {
     await tester.pumpWidget(
       _harness(
         const Column(
-          children: const [
+          children: [
             CatalogItem(
               kind: SaloniCatalogKind.service,
               name: 'حلاقة شعر ولحية',
