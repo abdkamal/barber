@@ -37,7 +37,9 @@ class PendingActivationBanner extends ConsumerWidget {
     return const SaloniBanner(
       tone: SaloniBannerTone.info,
       title: 'صالونك بانتظار التفعيل',
-      body: 'لا يظهر للزبائن قبل تفعيله من فريق صالوني. أكمل ملفه وخدماته في الأثناء.',
+      body:
+          'لا يظهر للزبائن قبل تفعيله من فريق صالوني. أكمل بياناته وخدماته في الأثناء — '
+          'يمكنك إضافة الشعار والصور بعد التفعيل.',
     );
   }
 }

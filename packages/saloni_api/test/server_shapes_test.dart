@@ -240,6 +240,24 @@ void main() {
       });
       expect(p.customerName, 'سالم');
       expect(p.finishedAt, isNotNull);
+      expect(p.confirmedAmountCents, isNull);
+      expect(p.discrepancy, isFalse);
+    });
+
+    test('Payment with confirmedAmountCents/discrepancy (مراجعة المرحلة 6)', () {
+      final p = Payment.fromJson({
+        'id': 'p1',
+        'bookingId': 'b1',
+        'amountCents': 5000,
+        'confirmedAmountCents': 4500,
+        'discrepancy': true,
+        'status': 'confirmed',
+        'confirmedBy': 'st1',
+        'confirmedAt': '2026-09-24T10:45:00.000Z',
+      });
+      expect(p.amountCents, 5000);
+      expect(p.confirmedAmountCents, 4500);
+      expect(p.discrepancy, isTrue);
     });
 
     test('StaffImpact', () {
@@ -538,6 +556,43 @@ void main() {
       expect((await c.transferBooking(bookingId: 'b1', toBarberId: 'br2')).barberId, 'br2');
       expect((await c.getPhoneDisputes()).single.accountId, isNull);
       await c.resolvePhoneDispute(accountId: 'a1', walkInId: 'w1');
+    });
+
+    test('phone dispute additive fields (accountStatus/linkedWalkInId/proposedWalkInId — H2)', () async {
+      routes['GET /v1/manager/phone-disputes'] = (_) => jsonResponse([
+            {
+              'phone': '0500000000',
+              'accountId': 'a1',
+              'accountStatus': 'suspended',
+              'linkedWalkInId': 'w0',
+              'proposedWalkInId': 'w2',
+              'walkIns': [
+                {'id': 'w1', 'name': 'حاضر', 'createdAt': '2026-09-24T09:00:00.000Z'},
+              ],
+            }
+          ], 200);
+      final c = client();
+      await c.setSession(Session.fromJson(sessionJson()), rememberMe: false);
+      final d = (await c.getPhoneDisputes()).single;
+      expect(d.accountStatus, 'suspended');
+      expect(d.linkedWalkInId, 'w0');
+      expect(d.proposedWalkInId, 'w2');
+      expect(d.walkIns.single.name, 'حاضر');
+    });
+
+    test('customer phone/link management (H2): unlink, reassign phone, release phone', () async {
+      routes['POST /v1/manager/customers/c1/unlink-walkin'] = (_) => jsonResponse({'ok': true}, 200);
+      routes['PUT /v1/manager/customers/c1/phone'] = (req) {
+        expect(jsonDecode(req.body), {'phone': '0511111111'});
+        return jsonResponse({'id': 'c1', 'phone': '0511111111'}, 200);
+      };
+      routes['POST /v1/manager/customers/c1/release-phone'] = (_) => jsonResponse({'ok': true}, 200);
+      final c = client();
+      await c.setSession(Session.fromJson(sessionJson()), rememberMe: false);
+      await c.unlinkWalkInRecord('c1');
+      final updated = await c.updateCustomerPhone('c1', '0511111111');
+      expect(updated['phone'], '0511111111');
+      await c.releaseCustomerPhone('c1');
     });
 
     test('heartbeat sends no queueDigest', () async {

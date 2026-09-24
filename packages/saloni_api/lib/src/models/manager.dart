@@ -79,6 +79,9 @@ class PhoneDispute {
   const PhoneDispute({
     required this.phone,
     this.accountId,
+    this.accountStatus,
+    this.linkedWalkInId,
+    this.proposedWalkInId,
     this.walkIns = const [],
   });
 
@@ -86,11 +89,24 @@ class PhoneDispute {
 
   /// حساب التطبيق بنفس الرقم (إن وُجد) — لا يمكن الحل بدونه.
   final String? accountId;
+
+  /// حالة ذلك الحساب (`pending`/`active`/`suspended`) — رقم لحساب معلَّق أو
+  /// موقوف قد يظهر هنا أيضًا (مراجعة المرحلة 6).
+  final String? accountStatus;
+
+  /// سجل الحاضر المربوط فعليًا بالحساب حاليًا، إن وُجد.
+  final String? linkedWalkInId;
+
+  /// ربط مقترح (H2): يصبح فعليًا فقط بعد اعتماد الحساب.
+  final String? proposedWalkInId;
   final List<WalkInRecord> walkIns;
 
   factory PhoneDispute.fromJson(Map<String, dynamic> json) => PhoneDispute(
         phone: json['phone'] as String? ?? '',
         accountId: json['accountId'] as String?,
+        accountStatus: json['accountStatus'] as String?,
+        linkedWalkInId: json['linkedWalkInId'] as String?,
+        proposedWalkInId: json['proposedWalkInId'] as String?,
         walkIns: parseList(json['walkIns'], WalkInRecord.fromJson),
       );
 }

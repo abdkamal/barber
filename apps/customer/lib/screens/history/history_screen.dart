@@ -131,6 +131,15 @@ class _HistoryTile extends StatelessWidget {
               Text(formatPrice(priceCents, currency)),
             ],
           ),
+          // سبب الإلغاء (مثل انتهاء يوم العمل قبل بدء خدمته) إن أرسله السيرفر
+          // — design.md §8 «إلغاء بسبب الإغلاق»؛ التنبيه اللحظي يصل بالفعل
+          // بإشعار منفصل عند وقوعه، وهذا عرضه لاحقًا في السجل إن توفر.
+          if ((b.status == api.BookingStatus.cancelled || b.status == api.BookingStatus.expired) &&
+              (b.lastChangeReason ?? '').isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(b.lastChangeReason!,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic)),
+          ],
         ],
       ),
     );

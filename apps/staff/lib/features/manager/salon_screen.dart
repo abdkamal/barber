@@ -132,6 +132,11 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
   }
 
   /// رفع صورة (الصور أو الشعار). يضغطها السيرفر ويزيل بيانات EXIF (§7).
+  ///
+  /// **قبل التفعيل** (`pending_activation`) يرفض السيرفر الرفع
+  /// (`409 SALON_NOT_ACTIVE` — مراجعة المرحلة 6)؛ الزر معطَّل عندها أصلًا
+  /// (انظر البناء أدناه) فلا يصل المستخدم لهذا الاستدعاء، لكن نُبقي الرسالة
+  /// هنا احتياطًا (مثلًا إن تغيّرت حالة الصالون أثناء فتح الشاشة).
   Future<void> _upload({required bool logo}) async {
     if (!logo && _photos.length >= 6) {
       toast(context, 'الحد الأقصى 6 صور');
@@ -198,6 +203,9 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
     final c = context.saloniColors;
     final auth = ref.watch(authProvider);
     final cur = auth.currency;
+    // مراجعة المرحلة 6: رفع الصور والشعار يُرفض (409 SALON_NOT_ACTIVE) قبل
+    // تفعيل الصالون — تُعطَّل الأزرار بدل محاولة رفع تفشل دون تفسير.
+    final uploadsBlocked = auth.salon?.pendingActivation ?? false;
     final initial = _name.text.trim().isEmpty ? 'ص' : _name.text.trim().characters.first;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -229,9 +237,11 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
                       icon: SaloniIconName.image,
                       size: SaloniButtonSize.sm,
                       variant: SaloniButtonVariant.secondary,
-                      onPressed: () => _upload(logo: true),
+                      onPressed: uploadsBlocked ? null : () => _upload(logo: true),
                     ),
                   ]),
+                  if (uploadsBlocked)
+                    const Muted('يمكنك إضافة الشعار والصور بعد تفعيل الصالون.'),
                   SaloniTextField(label: 'اسم الصالون', controller: _name),
                   SaloniTextField(label: 'النبذة', controller: _about),
                   SaloniTextField(label: 'العنوان', controller: _address),
@@ -309,7 +319,7 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
                           icon: SaloniIconName.plus,
                           variant: SaloniButtonVariant.ghost,
                           block: true,
-                          onPressed: () => _upload(logo: false),
+                          onPressed: uploadsBlocked ? null : () => _upload(logo: false),
                         ),
                     ],
                   ),

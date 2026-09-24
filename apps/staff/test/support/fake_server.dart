@@ -35,6 +35,12 @@ class FakeServer {
   List<String> closingWarnings = const [];
   Map<String, dynamic>? walkInResult;
   Map<String, dynamic>? registered;
+  List<Map<String, dynamic>> managerCustomers = const [];
+  final List<String> approvedCustomerIds = [];
+  final List<String> suspendedCustomerIds = [];
+  final List<String> unlinkedCustomerIds = [];
+  final List<Map<String, dynamic>> phoneUpdates = [];
+  final List<String> releasedPhoneCustomerIds = [];
   final List<Map<String, dynamic>> schedulesPut = [];
   final List<Map<String, dynamic>> servicesCreated = [];
   final List<Map<String, dynamic>> transfers = [];
@@ -281,13 +287,14 @@ class FakeServer {
         return json({'requireAccountApproval': false, 'maxActiveBookingsPerCustomer': 1});
       case 'GET /manager/breaks':
       case 'GET /manager/staff':
-      case 'GET /manager/customers':
       case 'GET /manager/phone-disputes':
       case 'GET /manager/schedules':
       case 'GET /manager/absences':
       case 'GET /manager/catalog':
       case 'GET /manager/services':
         return json([]);
+      case 'GET /manager/customers':
+        return json(managerCustomers);
       case 'GET /manager/profile':
         return json({'name': 'صالون الراحة', 'about': null, 'socialLinks': []});
       case 'GET /manager/reports':
@@ -316,6 +323,32 @@ class FakeServer {
       final id = path.split('/')[3];
       transfers.add({'bookingId': id, ...body()});
       return json(bookingJson(id: id, name: 'زبون', barberId: body()['toBarberId'] as String));
+    }
+    if (path.startsWith('/manager/customers/')) {
+      final parts = path.split('/'); // ['', 'manager', 'customers', '{id}', ...]
+      final id = parts[3];
+      final action = parts.length > 4 ? parts[4] : null;
+      switch ('${req.method} ${action ?? ''}') {
+        case 'POST approve':
+          approvedCustomerIds.add(id);
+          return json({'ok': true});
+        case 'POST suspend':
+          suspendedCustomerIds.add(id);
+          return json({'ok': true});
+        case 'POST reset-code':
+          return json({'code': '123456'});
+        case 'POST link-walkin':
+          return json({'ok': true});
+        case 'POST unlink-walkin':
+          unlinkedCustomerIds.add(id);
+          return json({'ok': true});
+        case 'POST release-phone':
+          releasedPhoneCustomerIds.add(id);
+          return json({'ok': true});
+        case 'PUT phone':
+          phoneUpdates.add({'id': id, 'phone': body()['phone']});
+          return json({'id': id, 'phone': body()['phone']});
+      }
     }
     return json({
       'error': {'code': 'NOT_FOUND', 'message': 'غير موجود: $path'}

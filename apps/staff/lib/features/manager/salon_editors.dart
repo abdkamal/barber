@@ -173,13 +173,25 @@ class _CatalogEditorState extends ConsumerState<_CatalogEditor> {
           ),
         ),
         const SizedBox(height: 12),
-        SaloniButton(
-          label: _photo == null ? 'صورة العنصر' : 'تم اختيار صورة',
-          icon: SaloniIconName.image,
-          variant: SaloniButtonVariant.secondary,
-          block: true,
-          onPressed: _pickPhoto,
-        ),
+        Builder(builder: (ctx) {
+          // مراجعة المرحلة 6: رفع الصور يُرفض قبل تفعيل الصالون
+          // (409 SALON_NOT_ACTIVE) — يُعطَّل الاختيار بدل رفع يفشل لاحقًا
+          // دون تفسير للمستخدم.
+          final blocked = ref.watch(authProvider).salon?.pendingActivation ?? false;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SaloniButton(
+                label: _photo == null ? 'صورة العنصر' : 'تم اختيار صورة',
+                icon: SaloniIconName.image,
+                variant: SaloniButtonVariant.secondary,
+                block: true,
+                onPressed: blocked ? null : _pickPhoto,
+              ),
+              if (blocked) const Muted('يمكنك إضافة صورة العنصر بعد تفعيل الصالون.'),
+            ],
+          );
+        }),
         if (_error != null) ...[
           const SizedBox(height: 12),
           SaloniBanner(tone: SaloniBannerTone.danger, body: _error),

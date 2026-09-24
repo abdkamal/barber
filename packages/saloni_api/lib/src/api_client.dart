@@ -584,6 +584,22 @@ class ApiClient {
       await _send('POST', '/manager/customers/$customerId/link-walkin',
           body: {'walkInId': walkInId});
 
+  /// يفك ربط (أو اقتراح ربط) سجل الحاضر بحساب الزبون (H2). يُسجَّل بالتدقيق.
+  Future<void> unlinkWalkInRecord(String customerId) async =>
+      await _send('POST', '/manager/customers/$customerId/unlink-walkin');
+
+  /// إعادة إسناد رقم هاتف الزبون (H2، نزاع رقم ق20) — تُلغى جلساته الحالية
+  /// وربط سجله السابق. `409 PHONE_IN_USE` إن كان الرقم لحساب آخر بالفعل.
+  Future<Map<String, dynamic>> updateCustomerPhone(
+          String customerId, String phone) async =>
+      await _send('PUT', '/manager/customers/$customerId/phone',
+          body: {'phone': phone}) as Map<String, dynamic>;
+
+  /// يوقف الحساب ويُفرج عن رقمه (H2) ليسجّل به صاحبه الحقيقي من جديد؛ لا
+  /// يُعتمد الحساب الحالي بعدها قبل إسناد رقم آخر (`409 PHONE_RELEASED`).
+  Future<void> releaseCustomerPhone(String customerId) async =>
+      await _send('POST', '/manager/customers/$customerId/release-phone');
+
   /// أرقام لها أكثر من سجل حاضر غير مربوط (ق20).
   Future<List<PhoneDispute>> getPhoneDisputes() async =>
       parseList(await _send('GET', '/manager/phone-disputes'),

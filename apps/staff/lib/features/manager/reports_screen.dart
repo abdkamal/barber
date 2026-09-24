@@ -139,6 +139,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     final pending = d['pendingItems'] is Map ? d['pendingItems'] as Map : const {};
 
     final confirmed = intOf(total, ['confirmed']) ?? 0;
+    // سعر السيرفر للمؤكد (مراجعة المرحلة 6) — يختلف عن [confirmed] فقط إن
+    // أكّد حلاق مبلغًا غير سعر الخدمة (`payment_confirmed`، AMOUNT_DIFFERS_FROM_PRICE).
+    final expectedConfirmed = intOf(total, ['expectedConfirmed']);
     final awaiting = intOf(total, ['awaiting', 'pending']) ?? 0;
     int sum(List<Map<String, dynamic>> l, String k) => l.fold(0, (a, x) => a + (intOf(x, [k]) ?? 0));
     final done = sum(visits, 'done');
@@ -197,6 +200,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     final conflicts = intOf(pending, ['syncConflicts']) ?? 0;
     final accounts = intOf(pending, ['pendingAccounts']) ?? 0;
     final disputes = intOf(pending, ['phoneDisputes']) ?? 0;
+    // اختلاف بين المبلغ الذي أكده الحلاق وسعر السيرفر (مراجعة المرحلة 6).
+    final discrepancies = intOf(pending, ['paymentDiscrepancies']) ?? 0;
 
     return [
       LayoutBuilder(builder: (context, box) {
@@ -204,7 +209,17 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
         return Wrap(spacing: 10, runSpacing: 10, children: [
           SizedBox(
             width: w,
-            child: StatTile(label: 'الإيراد المؤكد', value: cur.amount(confirmed), unit: cur.symbol),
+            child: StatTile(
+              label: 'الإيراد المؤكد',
+              value: cur.amount(confirmed),
+              unit: cur.symbol,
+              delta: (expectedConfirmed != null && expectedConfirmed != confirmed)
+                  ? 'السعر المسجَّل ${cur.format(expectedConfirmed)}'
+                  : null,
+              deltaTone: (expectedConfirmed != null && expectedConfirmed != confirmed)
+                  ? SaloniTone.warning
+                  : null,
+            ),
           ),
           SizedBox(
             width: w,
@@ -291,13 +306,19 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
           ),
         ]),
       Section(title: 'المعلّقات', children: [
-        if (unconfirmed + conflicts + accounts + disputes == 0)
+        if (unconfirmed + conflicts + accounts + disputes + discrepancies == 0)
           const SaloniBanner(tone: SaloniBannerTone.success, body: 'لا معلّقات تحتاج قرارك.'),
         if (unconfirmed > 0)
           SaloniBanner(
             tone: SaloniBannerTone.warning,
             title: digits('$unconfirmed دفعة بانتظار التأكيد'),
             body: 'يؤكدها الحلاق من شاشة «الدفعات» عند استلام المبلغ.',
+          ),
+        if (discrepancies > 0)
+          SaloniBanner(
+            tone: SaloniBannerTone.warning,
+            title: digits('$discrepancies دفعة بمبلغ مختلف عمّا سجّله السيرفر'),
+            body: 'أكّد الحلاق مبلغًا غير سعر الخدمة المسجّل — راجع شاشة «الدفعات».',
           ),
         if (accounts > 0)
           SaloniBanner(

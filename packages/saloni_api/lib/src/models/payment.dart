@@ -2,13 +2,16 @@ import 'enums.dart';
 import 'json_utils.dart';
 
 /// دفعة — مستقلة عن حالة الخدمة (design.md §2، §3)، بشكل `GET /staff/payments`:
-/// `{id, bookingId, amountCents, status, confirmedBy, confirmedAt, barberId,
-/// customerName, workDate, finishedAt, createdAt}`.
+/// `{id, bookingId, amountCents, confirmedAmountCents, discrepancy, status,
+/// confirmedBy, confirmedAt, barberId, customerName, workDate, finishedAt,
+/// createdAt}`.
 class Payment {
   const Payment({
     required this.id,
     required this.bookingId,
     required this.amountCents,
+    this.confirmedAmountCents,
+    this.discrepancy = false,
     required this.status,
     this.confirmedBy,
     this.confirmedAt,
@@ -21,7 +24,15 @@ class Payment {
 
   final String id;
   final String bookingId;
+
+  /// المبلغ المتوقع (لقطة أسعار السيرفر — لا يغيّره الجهاز، مراجعة المرحلة 6).
   final int amountCents;
+
+  /// ما أبلغ به جهاز الحلاق فعلًا عند التأكيد، أو `null` قبل التأكيد.
+  final int? confirmedAmountCents;
+
+  /// هل يختلف [confirmedAmountCents] عن [amountCents]؟
+  final bool discrepancy;
   final PaymentStatus status;
   final String? confirmedBy;
   final DateTime? confirmedAt;
@@ -37,6 +48,8 @@ class Payment {
         id: json['id'] as String,
         bookingId: json['bookingId'] as String,
         amountCents: asIntOrNull(json['amountCents']) ?? 0,
+        confirmedAmountCents: asIntOrNull(json['confirmedAmountCents']),
+        discrepancy: json['discrepancy'] as bool? ?? false,
         status: PaymentStatus.fromWire(json['status'] as String),
         confirmedBy: json['confirmedBy'] as String?,
         confirmedAt: parseUtcOrNull(json['confirmedAt'] as String?),
@@ -51,6 +64,8 @@ class Payment {
         'id': id,
         'bookingId': bookingId,
         'amountCents': amountCents,
+        'confirmedAmountCents': confirmedAmountCents,
+        'discrepancy': discrepancy,
         'status': status.toWire(),
         'confirmedBy': confirmedBy,
         'confirmedAt': toIsoOrNull(confirmedAt),

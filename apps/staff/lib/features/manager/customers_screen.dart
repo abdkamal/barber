@@ -47,6 +47,9 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
             !linked.contains(str(x, ['id'])))
         .toList();
     final status = str(c, ['status']);
+    // H2: سجل حاضر مربوط فعليًا أو مقترح (بانتظار اعتماد الحساب).
+    final hasLinkedWalkIn = str(c, ['linked_walk_in_id', 'linkedWalkInId']).isNotEmpty ||
+        str(c, ['proposed_walk_in_id', 'proposedWalkInId']).isNotEmpty;
     final action = await showSaloniSheet<String>(context, (ctx) {
       final col = ctx.saloniColors;
       return Column(
@@ -89,6 +92,24 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
                 onPressed: () => Navigator.of(ctx).pop('link'),
               ),
             ],
+            if (hasLinkedWalkIn) ...[
+              const SizedBox(height: 10),
+              SaloniButton(
+                label: 'فك ربط سجل الحاضر',
+                icon: SaloniIconName.x,
+                variant: SaloniButtonVariant.secondary,
+                block: true,
+                onPressed: () => Navigator.of(ctx).pop('unlink'),
+              ),
+            ],
+            const SizedBox(height: 10),
+            SaloniButton(
+              label: 'تعديل رقم الهاتف',
+              icon: SaloniIconName.phone,
+              variant: SaloniButtonVariant.secondary,
+              block: true,
+              onPressed: () => Navigator.of(ctx).pop('reassign-phone'),
+            ),
           ],
           if (status != 'suspended' && !_isWalkIn(c)) ...[
             const SizedBox(height: 10),
@@ -97,6 +118,16 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
               variant: SaloniButtonVariant.danger,
               block: true,
               onPressed: () => Navigator.of(ctx).pop('suspend'),
+            ),
+          ],
+          if (status == 'suspended' && !_isWalkIn(c)) ...[
+            const SizedBox(height: 10),
+            SaloniButton(
+              label: 'الإفراج عن الرقم',
+              icon: SaloniIconName.xCircle,
+              variant: SaloniButtonVariant.danger,
+              block: true,
+              onPressed: () => Navigator.of(ctx).pop('release-phone'),
             ),
           ],
         ],
@@ -145,6 +176,55 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
           if (target == null) return;
           await api.linkWalkInRecord(id, target);
           if (mounted) toast(context, 'رُبط السجل');
+        case 'unlink':
+          final ok = await confirmDialog(context,
+              title: 'فك ربط سجل الحاضر',
+              body: 'يفصل سجل الزيارات السابقة عن حساب ${str(c, ['name'])} (H2).',
+              confirm: 'فك الربط',
+              danger: true);
+          if (!ok) return;
+          await api.unlinkWalkInRecord(id);
+          if (mounted) toast(context, 'فُكّ الربط');
+        case 'reassign-phone':
+          if (!mounted) return;
+          final controller = TextEditingController();
+          final newPhone = await showSaloniSheet<String>(context, (ctx) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SectionTitle('تعديل رقم الهاتف'),
+                const SizedBox(height: 6),
+                const Muted('تُلغى جلسات الحساب الحالية وربط سجله عند تغيير الرقم (H2).'),
+                const SizedBox(height: 12),
+                SaloniTextField(
+                  label: 'الرقم الجديد',
+                  controller: controller,
+                  textDirection: TextDirection.ltr,
+                ),
+                const SizedBox(height: 14),
+                SaloniButton(
+                  label: 'حفظ',
+                  size: SaloniButtonSize.lg,
+                  block: true,
+                  onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+                ),
+              ],
+            );
+          });
+          if (newPhone == null || newPhone.isEmpty) return;
+          await api.updateCustomerPhone(id, newPhone);
+          if (mounted) toast(context, 'تحديث رقم الهاتف');
+        case 'release-phone':
+          final ok = await confirmDialog(context,
+              title: 'الإفراج عن الرقم',
+              body:
+                  'يبقى حساب ${str(c, ['name'])} موقوفًا، ويصبح رقمه متاحًا ليسجّل به صاحبه الحقيقي من جديد (H2).',
+              confirm: 'الإفراج',
+              danger: true);
+          if (!ok) return;
+          await api.releaseCustomerPhone(id);
+          if (mounted) toast(context, 'أُفرج عن الرقم');
       }
       _reload();
     } catch (e) {
