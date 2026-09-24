@@ -34,12 +34,15 @@ class InMemoryStoreHandle implements LocalStoreHandle {
   Future<void> destroy() => store.wipe();
 }
 
+/// تخزين في الذاكرة يحاكي ملف قاعدة واحدًا: كل فتح يعيد نفس البيانات، و`destroy`
+/// يمسحها.
 class InMemoryStoragePlatform implements StoragePlatform {
   InMemoryStoragePlatform({TokenStore? tokenStore})
       : _tokens = tokenStore ?? InMemoryTokenStore();
   final TokenStore _tokens;
+  final LocalStore shared = InMemoryLocalStore();
   @override
-  Future<LocalStoreHandle> openLocalStore() async => InMemoryStoreHandle();
+  Future<LocalStoreHandle> openLocalStore() async => InMemoryStoreHandle(shared);
   @override
   TokenStore createTokenStore() => _tokens;
 }

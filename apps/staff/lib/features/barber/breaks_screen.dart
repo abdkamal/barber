@@ -103,12 +103,10 @@ class BreaksScreen extends ConsumerWidget {
                 size: SaloniButtonSize.lg,
                 variant: SaloniButtonVariant.secondary,
                 block: true,
-                onPressed: repo.current != null
-                    ? null
-                    : () => repo.startBreak(sa.BreakKind.emergency),
+                onPressed: () => repo.startBreak(sa.BreakKind.emergency),
               ),
-            if (active == null && repo.current != null)
-              const Muted('أنهِ الخدمة الجارية قبل بدء الاستراحة.'),
+            if (active == null)
+              const Muted('سجّلها عند الحاجة المفاجئة؛ تُحدَّث أوقات زبائنك تلقائيًا.'),
             Section(title: 'استراحات اليوم', children: [
               if (breaks.isEmpty) const Muted('لا استراحات مجدولة اليوم.'),
               for (final b in breaks)
@@ -127,7 +125,6 @@ class BreaksScreen extends ConsumerWidget {
                       Text('${timeAr(b.start)} – ${timeAr(b.end)}',
                           style: SaloniTextStyles.body.copyWith(color: c.inkMuted)),
                       if (active == null &&
-                          repo.current == null &&
                           !now.isBefore(b.start.subtract(const Duration(minutes: 15))) &&
                           now.isBefore(b.end)) ...[
                         const SizedBox(width: 8),
@@ -142,6 +139,22 @@ class BreaksScreen extends ConsumerWidget {
                   ),
                 ),
             ]),
+            if (repo.walkInOnly.isNotEmpty)
+              Section(title: 'فترات الحاضرين فقط', children: [
+                const Muted('لا تُقبل فيها حجوزات التطبيق؛ أضف فيها زبائن حاضرين.'),
+                for (final w in repo.walkInOnly)
+                  SurfaceCard(
+                    child: Row(children: [
+                      SaloniIcon(SaloniIconName.userPlus, color: c.inkMuted),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text('حاضرون فقط', style: SaloniTextStyles.bodyStrong.copyWith(color: c.ink)),
+                      ),
+                      Text('${timeAr(w.start)} – ${timeAr(w.end)}',
+                          style: SaloniTextStyles.body.copyWith(color: c.inkMuted)),
+                    ]),
+                  ),
+              ]),
             Section(title: 'اليوم كله', children: [
               repo.absentToday
                   ? const SaloniBanner(

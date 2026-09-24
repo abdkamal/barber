@@ -82,8 +82,10 @@ void main() {
 
     // عودة الاتصال: يُرسل الصندوق.
     server.online = true;
+    server.requests.clear();
     await h.container.read(barberRepoProvider).refresh();
     await settle(tester);
+    expect(server.requests.first, 'POST /sync/events');
     expect(server.eventTypes, contains('service_started'));
     await teardownApp(tester, h);
   });

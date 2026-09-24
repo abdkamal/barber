@@ -139,7 +139,8 @@ export function toEntry(r: BookingRow): QueueEntry {
 }
 
 export function stateOf(dayRow: BarberDayRow | null, absent: boolean, now: number): BarberDayState {
-  if (absent || dayRow?.state === 'absent') return { kind: 'absent' };
+  // ق26: an absences row (reported by the barber or the manager) is the source of truth.
+  if (absent) return { kind: 'absent' };
   if (!dayRow?.first_connected_at || !dayRow.last_heartbeat_at) return { kind: 'not_connected' };
   const last = dayRow.last_heartbeat_at.getTime();
   if (now - last <= HEARTBEAT_TIMEOUT_MS) return { kind: 'online' };

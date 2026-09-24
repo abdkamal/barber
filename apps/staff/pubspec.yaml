@@ -37,3 +37,25 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # خطوط نظام التصميم: saloni_ui يسجّلها باسم «packages/saloni_ui/…» بينما أنماطه
+  # تطلبها بالاسم المجرد فلا تُطبَّق. حل مؤقت: نسخة مطابقة من ملفات الحزمة (مع
+  # تراخيص OFL) مسجّلة هنا بالاسم المجرد (انظر README → تغييرات مطلوبة في الحزم).
+  assets:
+    - assets/fonts/licenses/
+  fonts:
+    - family: El Messiri
+      fonts:
+        - asset: assets/fonts/ElMessiri.ttf
+    - family: IBM Plex Sans Arabic
+      fonts:
+        - asset: assets/fonts/IBMPlexSansArabic-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/IBMPlexSansArabic-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/IBMPlexSansArabic-SemiBold.ttf
+          weight: 600
+    - family: IBM Plex Mono
+      fonts:
+        - asset: assets/fonts/IBMPlexMono-Medium.ttf
+          weight: 500

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { salonQuery, startApp, TestContext } from './helpers';
-import { auth, book, clock, Customer, event, heartbeat, isoAt, newCustomer, push, QueueSalon, runScheduler, setupQueueSalon, staffToday, T0 } from './queue-helpers';
+import { auth, book, clock, Customer, event, heartbeat, isoAt, newCustomer, push, QueueSalon, runScheduler, setupQueueSalon, staffToday, T0, closeQueueApp } from './queue-helpers';
 
 /**
  * Cross-tenant isolation for every milestone-4b endpoint (design §7): the salon comes only from
@@ -24,7 +24,7 @@ describe('queue endpoints — tenant isolation and roles', () => {
     customerB = await newCustomer(ctx, B);
     bookingA = (await book(ctx, customerA, { serviceIds: [A.services.haircut], kind: 'queue' })).body.id;
   });
-  afterAll(() => ctx.close());
+  afterAll(() => closeQueueApp(ctx));
 
   const crafted = (r: ReturnType<ReturnType<TestContext['http']>['get']>) => r.set('X-Salon-Id', A.id).set('X-Salon-Code', A.code);
 

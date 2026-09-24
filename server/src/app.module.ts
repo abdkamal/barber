@@ -7,6 +7,7 @@ import { CustomersController } from './customers/customers.controller';
 import { DatabaseModule } from './db/database.module';
 import { HealthController } from './health/health.controller';
 import { QueueModule } from './queue.module';
+import { ManagerFeaturesModule } from './profile/manager-features.module';
 import { ProvisioningService } from './provisioning/provisioning.service';
 import { SalonsController } from './provisioning/salons.controller';
 import { RateLimitGuard } from './security/rate-limit.guard';
@@ -15,9 +16,9 @@ import { SettingsController } from './settings/settings.controller';
 import { StaffController } from './staff/staff.controller';
 
 /**
- * Module seams for later milestones: bookings/queues, sync (events + change feed + WebSocket),
- * timers, notifications (FCM), reports and profile/catalog management plug in here, each using
- * the TenantContext from the verified token. Scheduling logic lives in packages/engine.
+ * QueueModule: bookings, staff day, sync, scheduler, notifications.
+ * ManagerFeaturesModule: profile, photos, catalog, services, schedules, reports, media.
+ * Every data access goes through the TenantContext from the verified token.
  */
 @Module({})
 export class ConfigModule {
@@ -31,7 +32,7 @@ export class AppModule {
   static forRoot(config: AppConfig): DynamicModule {
     return {
       module: AppModule,
-      imports: [ConfigModule.forRoot(config), DatabaseModule, AuthModule, QueueModule],
+      imports: [ConfigModule.forRoot(config), DatabaseModule, AuthModule, QueueModule, ManagerFeaturesModule],
       controllers: [HealthController, SalonsController, StaffController, CustomersController, SettingsController],
       providers: [
         ProvisioningService,

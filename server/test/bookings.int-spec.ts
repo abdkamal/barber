@@ -16,6 +16,8 @@ import {
   settle,
   setupQueueSalon,
   T0,
+  closeQueueApp,
+  dropCreatedSalons,
 } from './queue-helpers';
 
 /** Customer booking flows (api.md "الزبون", design §3 and §5). */
@@ -24,8 +26,9 @@ describe('bookings', () => {
   beforeAll(async () => {
     ctx = await startApp();
   });
-  afterAll(() => ctx.close());
+  afterAll(() => closeQueueApp(ctx));
   beforeEach(() => clock(ctx).set(T0));
+  afterEach(() => dropCreatedSalons(ctx));
 
   const quote = (token: string, body: Record<string, unknown>) =>
     ctx.http().post('/v1/bookings/quote').set(auth(token)).set('Idempotency-Key', randomUUID()).send(body);

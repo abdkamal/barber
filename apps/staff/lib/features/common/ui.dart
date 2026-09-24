@@ -72,7 +72,7 @@ class PageHeader extends StatelessWidget {
           ),
           if (trailing != null) ...[
             const SizedBox(width: SaloniSpacing.space3),
-            Flexible(child: trailing!),
+            trailing!,
           ],
         ],
       ),

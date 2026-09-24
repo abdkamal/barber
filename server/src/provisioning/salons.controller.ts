@@ -1,3 +1,4 @@
+import { isOpenNow, publicWeeklyHours, type ScheduleRow } from '../schedules/public-hours';
 import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { z } from 'zod';
@@ -60,7 +61,7 @@ export class SalonsController {
     const found = await this.resolver.forCode(code);
     if (!found || found.record.status !== 'active') throw Errors.salonNotFound();
     const t = found.tenant;
-    const [profile, photos, catalog, services] = await Promise.all([
+    const [profile, photos, catalog, services, schedules] = await Promise.all([
       t.db.query(
         `SELECT name, about, logo_path, address, latitude::float8 AS latitude, longitude::float8 AS longitude,
                 phone, whatsapp, social_links FROM salon_profile WHERE id = 1`,
@@ -71,19 +72,25 @@ export class SalonsController {
            FROM catalog_items WHERE visible ORDER BY kind, position, name`,
       ),
       t.db.query('SELECT id, name, base_duration_minutes, price_minor FROM services WHERE active ORDER BY position, name'),
+      t.db.query<ScheduleRow>("SELECT staff_id, weekday, to_char(opens_at, 'HH24:MI:SS') AS opens_at, to_char(closes_at, 'HH24:MI:SS') AS closes_at FROM work_schedules"),
     ]);
+    const salonCode = found.record.code;
+    // Stored paths are `{salonId}/{file}`; the public URL is keyed by salon code (media controller).
+    const mediaUrl = (path: string | null | undefined) => (path ? `/v1/media/${salonCode}/${path.split('/').pop()}` : null);
     const p = profile.rows[0] ?? {};
     return {
-      code: found.record.code,
+      code: salonCode,
       name: p.name ?? found.record.name,
       timezone: found.record.timezone,
       currency: found.record.currency,
       about: p.about ?? null,
-      logo: p.logo_path ?? null,
+      logo: mediaUrl(p.logo_path),
       address: p.address ?? null,
       location: p.latitude != null ? { lat: p.latitude, lng: p.longitude } : null,
       contact: { phone: p.phone ?? null, whatsapp: p.whatsapp ?? null, social: p.social_links ?? [] },
-      photos: photos.rows.map((r) => ({ id: r.id, path: r.path, position: r.position })),
+      photos: photos.rows.map((r) => ({ id: r.id, url: mediaUrl(r.path), position: r.position })),
+      hours: publicWeeklyHours(schedules.rows),
+      openNow: isOpenNow(schedules.rows, found.record.timezone),
       services: services.rows.map((r) => ({
         id: r.id,
         name: r.name,
@@ -97,7 +104,7 @@ export class SalonsController {
         description: r.description,
         features: r.features,
         price: r.price_minor == null ? null : Number(r.price_minor),
-        photo: r.photo_path,
+        photo: mediaUrl(r.photo_path),
         serviceId: r.service_id,
       })),
     };

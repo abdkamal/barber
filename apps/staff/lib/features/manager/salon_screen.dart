@@ -330,6 +330,9 @@ class _SalonScreenState extends ConsumerState<SalonScreen> {
                               f.toString(),
                           ],
                           minutes: _minutesFor(item),
+                          imageProvider: str(item, ['photo']).isEmpty
+                              ? null
+                              : NetworkImage(_url(str(item, ['photo']))),
                         ),
                       ),
                     SaloniButton(

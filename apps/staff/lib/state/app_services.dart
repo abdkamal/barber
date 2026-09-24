@@ -166,6 +166,18 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// يحدّث بيانات الصالون (مثل انتهاء «بانتظار التفعيل») من `GET /auth/session`.
+  Future<void> refreshSessionInfo() async {
+    try {
+      final r = await services.raw.send('GET', '/auth/session');
+      if (r is Map && r['salon'] is Map) {
+        salon = SalonMeta.fromJson(Map<String, dynamic>.from(r['salon'] as Map));
+        await services.prefs.setSalon(salon);
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
   /// ق37: تسجيل صالون جديد — يعيد رمز الصالون. المالك يدخل كمدير مباشرة.
   Future<String> registerSalon({
     required Map<String, dynamic> salonData,

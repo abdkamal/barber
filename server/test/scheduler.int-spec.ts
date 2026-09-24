@@ -18,6 +18,8 @@ import {
   setupQueueSalon,
   staffToday,
   T0,
+  closeQueueApp,
+  dropCreatedSalons,
 } from './queue-helpers';
 
 /** Background loop: day states (§4), ق3, calling (§5.5), ق5/ق23, ق27, ق32. */
@@ -26,8 +28,9 @@ describe('scheduler', () => {
   beforeAll(async () => {
     ctx = await startApp();
   });
-  afterAll(() => ctx.close());
+  afterAll(() => closeQueueApp(ctx));
   beforeEach(() => clock(ctx).set(T0));
+  afterEach(() => dropCreatedSalons(ctx));
 
   const svc = (s: { services: { haircut: string } }) => [s.services.haircut];
 

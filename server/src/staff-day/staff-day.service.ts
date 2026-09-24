@@ -142,7 +142,7 @@ export class StaffDayService {
       const wasOffline = ctx.state.kind === 'offline';
       const knownEnd = queueEnd(ctx.day, ctx.queue.filter((e) => !e.offer), now);
       await q.query(
-        `UPDATE barber_days SET state = CASE WHEN state = 'absent' THEN 'absent' ELSE 'connected' END,
+        `UPDATE barber_days SET state = CASE WHEN $7 THEN 'absent' ELSE 'connected' END,
                 first_connected_at = COALESCE(first_connected_at, $2), last_heartbeat_at = $2,
                 known_work_end_at = $3, known_work_minutes_at_last_heartbeat = $4,
                 -- Kept until the scheduler has sent the one reconciled ق5 notice (design §4 "عند عودة الاتصال").
@@ -156,6 +156,7 @@ export class StaffDayService {
           Math.max(0, Math.round((knownEnd - now) / MINUTE)),
           body.deviceSeq,
           ctx.state.kind === 'offline' ? new Date(ctx.state.offlineSince) : null,
+          ctx.state.kind === 'absent',
         ],
       );
       const newState = stateOf({ ...ctx.dayRow!, first_connected_at: ctx.dayRow!.first_connected_at ?? new Date(now), last_heartbeat_at: new Date(now) }, false, now);

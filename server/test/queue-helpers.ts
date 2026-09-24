@@ -53,8 +53,11 @@ export function fake(ctx: TestContext): FakeNotifier {
  * A salon with three services and `barbers` barbers working 09:00–23:00 (Riyadh) every day.
  * Services: haircut 30 min / 50.00, beard 15 min / 25.00, long 60 min / 100.00.
  */
+const created = new Map<TestContext, SalonFixture[]>();
+
 export async function setupQueueSalon(ctx: TestContext, opts: { barbers?: number; opens?: string; closes?: string } = {}): Promise<QueueSalon> {
   const salon = await createSalon(ctx, 'صالون الطابور');
+  created.set(ctx, [...(created.get(ctx) ?? []), salon]);
   const [haircut] = await salonQuery(ctx, salon.dbName, "INSERT INTO services (name, base_duration_minutes, price_minor, position) VALUES ('قص', 30, 5000, 1) RETURNING id");
   const [beard] = await salonQuery(ctx, salon.dbName, "INSERT INTO services (name, base_duration_minutes, price_minor, position) VALUES ('لحية', 15, 2500, 2) RETURNING id");
   const [long] = await salonQuery(ctx, salon.dbName, "INSERT INTO services (name, base_duration_minutes, price_minor, position) VALUES ('باقة', 60, 10000, 3) RETURNING id");
@@ -144,5 +147,38 @@ export async function liveUntil(ctx: TestContext, b: Barber, minutesFromT0: numb
   while (c.now() < at(minutesFromT0)) {
     c.set(Math.min(c.now() + MIN, at(minutesFromT0)));
     await heartbeat(ctx, b);
+  }
+}
+
+/**
+ * Drops the salons a suite created (database + directory row). PgBouncer keeps idle server
+ * connections per database for minutes; without this, many suites exhaust max_connections.
+ */
+export async function closeQueueApp(ctx: TestContext) {
+  await ctx.close();
+  await dropCreatedSalons(ctx);
+}
+
+export async function dropCreatedSalons(ctx: TestContext) {
+  const salons = created.get(ctx) ?? [];
+  created.delete(ctx);
+  if (!salons.length) return;
+  const { PoolManager } = await import('../src/db/pools');
+  const pools = new PoolManager(ctx.config);
+  try {
+    const admin = await pools.adminClient();
+    try {
+      for (const s of salons) await admin.query(`DROP DATABASE IF EXISTS "${s.dbName}" WITH (FORCE)`);
+    } finally {
+      await admin.end();
+    }
+    const dir = await pools.adminClient(ctx.config.db.directoryDbName);
+    try {
+      await dir.query('DELETE FROM salons WHERE id = ANY($1::uuid[])', [salons.map((s) => s.id)]);
+    } finally {
+      await dir.end();
+    }
+  } finally {
+    await pools.close();
   }
 }

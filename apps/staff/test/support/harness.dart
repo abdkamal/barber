@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:saloni_api/saloni_api.dart' as sa;
@@ -11,6 +12,30 @@ import 'package:saloni_staff/state/app_services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'fake_server.dart';
+
+bool _fontsLoaded = false;
+
+/// يحمّل خطوط نظام التصميم الحقيقية (بدل خط الاختبار المربّع) لتكون فحوص
+/// التجاوز على عرض 360 واقعية.
+Future<void> loadDesignFonts() async {
+  if (_fontsLoaded) return;
+  _fontsLoaded = true;
+  Future<void> load(String family, List<String> files) async {
+    final loader = FontLoader(family);
+    for (final f in files) {
+      loader.addFont(rootBundle.load('assets/fonts/$f'));
+    }
+    await loader.load();
+  }
+
+  await load('El Messiri', ['ElMessiri.ttf']);
+  await load('IBM Plex Sans Arabic', [
+    'IBMPlexSansArabic-Regular.ttf',
+    'IBMPlexSansArabic-Medium.ttf',
+    'IBMPlexSansArabic-SemiBold.ttf',
+  ]);
+  await load('IBM Plex Mono', ['IBMPlexMono-Medium.ttf']);
+}
 
 class Harness {
   Harness(this.server, this.services, this.container);
@@ -31,6 +56,7 @@ Future<Harness> pumpStaffApp(
   double height = 800,
   double textScale = 1.0,
 }) async {
+  await tester.runAsync(loadDesignFonts);
   SharedPreferences.setMockInitialValues({
     'onboarding_barber': true,
     'onboarding_manager': true,

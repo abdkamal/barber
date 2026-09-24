@@ -73,12 +73,28 @@ class BarberShell extends ConsumerWidget {
 }
 
 /// هيكل المدير (navManager).
-class ManagerShell extends StatelessWidget {
+class ManagerShell extends ConsumerStatefulWidget {
   const ManagerShell({super.key, required this.shell});
   final StatefulNavigationShell shell;
 
   @override
+  ConsumerState<ManagerShell> createState() => _ManagerShellState();
+}
+
+class _ManagerShellState extends ConsumerState<ManagerShell> {
+  @override
+  void initState() {
+    super.initState();
+    // هل فُعّل الصالون منذ آخر دخول؟ (ق37)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final auth = ref.read(authProvider);
+      if (auth.salon?.pendingActivation ?? true) auth.refreshSessionInfo();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final shell = widget.shell;
     return FirstRunGate(
       role: 'manager',
       child: Scaffold(

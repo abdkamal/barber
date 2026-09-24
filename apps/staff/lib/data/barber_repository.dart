@@ -57,6 +57,9 @@ class BarberRepository extends ChangeNotifier {
   List<QueueEntry> entries = const [];
   List<sa.Service> services = const [];
   List<sa.BreakPeriod> breaks = const [];
+
+  /// فترات «حاضرون فقط» اليوم (ق33): لا حجوزات تطبيق، للزبائن الحاضرين فقط.
+  List<({DateTime start, DateTime end})> walkInOnly = const [];
   Map<String, dynamic> settings = const {};
   ActiveBreak? activeBreak;
   bool absentToday = false;
@@ -161,8 +164,19 @@ class BarberRepository extends ChangeNotifier {
     unawaited(device.updateKeepAlive(title: 'صالوني — الطاقم', text: t));
   }
 
+  ConnectionState? _lastEngineState;
+
   void _onConnection(ConnectionState s) {
     pending = s.pendingCount;
+    final prev = _lastEngineState;
+    _lastEngineState = s;
+    // المحرك يعيد بث آخر حالة (بنفس `since`) عند تغيّر عدد المعلّق فقط؛
+    // ليست نتيجة اتصال جديدة، فلا نغيّر حالة الشريط.
+    if (prev != null && prev.since == s.since && prev.status == s.status) {
+      _updateKeepAlive();
+      _notify();
+      return;
+    }
     switch (s.status) {
       case ConnectionStatus.syncing:
         // النبضة الدورية تمر بحالة «مزامنة» كل 30 ث؛ لا نغيّر الشريط إلا إن
@@ -267,6 +281,13 @@ class BarberRepository extends ChangeNotifier {
     if (engine == null || _refreshing || _disposed) return;
     _refreshing = true;
     try {
+      // تحديث يدوي أو بعد عودة الاتصال: أرسل كل المعلّق الآن متجاوزًا مهلة
+      // التراجع الأُسّي (لا يوفر `Outbox` خيار «إرسال فوري»).
+      for (final o in await engine.store.getOutbox()) {
+        if (o.nextRetryAt != null) {
+          await engine.store.putOutboxEntry(OutboxEntry(event: o.event, attempts: o.attempts));
+        }
+      }
       await engine.outbox.flush();
       final today = await api.getStaffToday();
       final raw = compat.lastRaw('/staff/today');
@@ -280,6 +301,12 @@ class BarberRepository extends ChangeNotifier {
       for (final id in warnings) {
         rawById[id.toString()]?['pastClosing'] = true;
       }
+      final wio = raw is Map && raw['walkInOnly'] is List ? raw['walkInOnly'] as List : const [];
+      walkInOnly = [
+        for (final w in wio.whereType<Map>())
+          if (DateTime.tryParse('${w['start']}') != null && DateTime.tryParse('${w['end']}') != null)
+            (start: DateTime.parse('${w['start']}'), end: DateTime.parse('${w['end']}')),
+      ];
       final day = raw is Map ? raw['day'] : null;
       noShiftToday = raw is Map && raw.containsKey('day') && day == null;
       if (day is Map && day['state'] == 'absent_today') absentToday = true;

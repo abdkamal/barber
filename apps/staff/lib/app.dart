@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:saloni_ui/saloni_ui.dart';
 
 import 'core/config.dart';
+import 'core/platform/push.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/reset_screen.dart';
 import 'features/barber/breaks_screen.dart';
@@ -104,10 +107,22 @@ class StaffApp extends ConsumerStatefulWidget {
 
 class _StaffAppState extends ConsumerState<StaffApp> {
   late final GoRouter _router;
+  StreamSubscription<PushMessage>? _push;
 
   @override
   void initState() {
     super.initState();
+    // رسائل FCM أثناء فتح التطبيق تُعرض داخل التطبيق (ق12).
+    _push = ref.read(servicesProvider).push.messages.listen((m) {
+      final text = [m.title, m.body].whereType<String>().where((t) => t.isNotEmpty).join(' — ');
+      if (text.isEmpty) return;
+      scaffoldMessengerKey.currentState?.showSnackBar(SnackBar(content: Text(text)));
+      if (ref.read(authProvider).status == AuthStatus.signedIn &&
+          ref.exists(barberRepoProvider) &&
+          m.type != 'account_pending') {
+        ref.read(barberRepoProvider).refresh();
+      }
+    });
     final auth = ref.read(authProvider);
     _router = buildRouter(auth);
     if (auth.status == AuthStatus.unknown) auth.bootstrap();
@@ -115,6 +130,7 @@ class _StaffAppState extends ConsumerState<StaffApp> {
 
   @override
   void dispose() {
+    _push?.cancel();
     _router.dispose();
     super.dispose();
   }

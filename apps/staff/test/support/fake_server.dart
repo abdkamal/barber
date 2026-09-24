@@ -26,6 +26,9 @@ class FakeServer {
   List<Map<String, dynamic>> managerQueues = const [];
   List<String> closingWarnings = const [];
   Map<String, dynamic>? walkInResult;
+  Map<String, dynamic>? registered;
+  final List<Map<String, dynamic>> schedulesPut = [];
+  final List<Map<String, dynamic>> servicesCreated = [];
 
   List<String> get eventTypes => [for (final e in events) e['type'] as String];
 
@@ -105,6 +108,22 @@ class FakeServer {
       case 'POST /auth/staff/login':
       case 'POST /auth/refresh':
         return json(session());
+      case 'POST /salons/register':
+        registered = body();
+        return json({
+          'salon': {'code': 'NEW-42', 'name': 'صالون جديد', 'status': 'pending_activation', 'timezone': 'Asia/Riyadh', 'currency': 'SAR'},
+          'session': {
+            ...session(),
+            'role': 'manager',
+            'salon': {'code': 'NEW-42', 'name': 'صالون جديد', 'status': 'pending_activation', 'timezone': 'Asia/Riyadh', 'currency': 'SAR'},
+          },
+        }, 201);
+      case 'PUT /manager/schedules':
+        schedulesPut.add(body());
+        return json(body());
+      case 'POST /manager/services':
+        servicesCreated.add(body());
+        return json({'id': 'new-${servicesCreated.length}', ...body()}, 201);
       case 'POST /auth/logout':
         return http.Response('', 204);
       case 'GET /staff/today':

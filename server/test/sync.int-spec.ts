@@ -19,6 +19,8 @@ import {
   setupQueueSalon,
   staffToday,
   T0,
+  closeQueueApp,
+  dropCreatedSalons,
 } from './queue-helpers';
 
 /** Device sync (design §6) through the booking state machine (§3). */
@@ -27,8 +29,9 @@ describe('staff sync', () => {
   beforeAll(async () => {
     ctx = await startApp();
   });
-  afterAll(() => ctx.close());
+  afterAll(() => closeQueueApp(ctx));
   beforeEach(() => clock(ctx).set(T0));
+  afterEach(() => dropCreatedSalons(ctx));
 
   const walkIn = (token: string, body: Record<string, unknown>, key = randomUUID()) =>
     ctx.http().post('/v1/staff/walk-ins').set(auth(token)).set('Idempotency-Key', key).send(body);
