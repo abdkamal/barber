@@ -13,4 +13,3 @@ build/
 .idea/
 pubspec_overrides.yaml
 server/storage-data/
-trial-apk/
