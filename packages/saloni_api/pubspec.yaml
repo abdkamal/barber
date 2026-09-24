@@ -1,0 +1,41 @@
+name: saloni_api
+description: >
+  عميل الواجهة البرمجية والنماذج المشتركة لتطبيقي «صالوني» (الزبون والطاقم) —
+  Shared Dart API client, models and staff offline-sync support for the
+  Saloni barber-queue apps.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+  flutter: ">=3.22.0"
+
+dependencies:
+  # Core (pure Dart, no Flutter dependency) — usable with `dart test`.
+  http: ^1.2.2
+  uuid: ^4.5.1
+  meta: ^1.15.0
+  async: ^2.11.0
+
+  # Used only by lib/staff_sync.dart (still pure-Dart-testable via drift's
+  # native/FFI backend; see README for the SQLCipher notes).
+  drift: ^2.20.3
+  sqlite3: ^2.4.6
+
+  # Used only by lib/flutter.dart and the Flutter-only parts of
+  # lib/staff_sync.dart (secure token storage, SQLCipher key material).
+  flutter:
+    sdk: flutter
+  flutter_secure_storage: ^9.2.2
+  sqlcipher_flutter_libs: ^0.6.4
+  path_provider: ^2.1.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  test: ^1.25.8
+  lints: ^4.0.0
+  drift_dev: ^2.20.3
+  build_runner: ^2.4.13
+
+flutter:

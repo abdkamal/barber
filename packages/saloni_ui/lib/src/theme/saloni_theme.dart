@@ -71,7 +71,7 @@ abstract final class SaloniTheme {
           backgroundColor: c.primary,
           foregroundColor: c.onPrimary,
           minimumSize: const Size.fromHeight(SaloniSizes.controlMd),
-          shape: RoundedRectangleBorder(borderRadius: SaloniRadius.mdAll),
+          shape: const RoundedRectangleBorder(borderRadius: SaloniRadius.mdAll),
         ),
       ),
       switchTheme: SwitchThemeData(

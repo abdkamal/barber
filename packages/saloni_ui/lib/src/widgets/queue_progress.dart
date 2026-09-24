@@ -1,0 +1,104 @@
+import 'package:flutter/material.dart';
+
+import '../theme/saloni_theme.dart';
+import '../tokens/saloni_radius.dart';
+import '../tokens/saloni_spacing.dart';
+import '../tokens/saloni_typography.dart';
+
+/// شريط تقدّم الطابور بلا أرقام — `QueueProgress` في `index.d.ts` (ق39).
+class QueueProgress extends StatelessWidget {
+  const QueueProgress({
+    super.key,
+    required this.done,
+    required this.ahead,
+    this.label,
+    this.updated,
+    this.note,
+  });
+
+  /// عدد النقاط المنجزة (الأدوار التي مرّت).
+  final int done;
+
+  /// عدد النقاط المتبقية قبل الدور الحالي.
+  final int ahead;
+
+  final String? label;
+  final String? updated;
+  final String? note;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.saloniColors;
+    return Semantics(
+      label: 'تقدّم الطابور',
+      container: true,
+      child: Container(
+        padding: const EdgeInsetsDirectional.symmetric(
+          horizontal: SaloniSpacing.space4,
+          vertical: SaloniSpacing.space3,
+        ),
+        decoration: BoxDecoration(
+          color: c.surfaceRaised,
+          border: Border.all(color: c.line),
+          borderRadius: SaloniRadius.lgAll,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  label ?? 'تقدّم الطابور',
+                  style: SaloniTextStyles.caption.copyWith(color: c.inkMuted),
+                ),
+                if (updated != null)
+                  Text(
+                    'آخر تحديث $updated',
+                    style: SaloniTextStyles.caption.copyWith(color: c.inkMuted),
+                  ),
+              ],
+            ),
+            const SizedBox(height: SaloniSpacing.space2),
+            ExcludeSemantics(
+              child: Row(
+                children: [
+                  for (var i = 0; i < done; i++) ...[
+                    Expanded(flex: 10, child: _dot(c.primary)),
+                    const SizedBox(width: 6),
+                  ],
+                  for (var i = 0; i < ahead; i++) ...[
+                    Expanded(flex: 10, child: _dot(c.line)),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    flex: 18,
+                    child: _dot(c.warning),
+                  ),
+                ],
+              ),
+            ),
+            if (note != null)
+              Padding(
+                padding: const EdgeInsets.only(top: SaloniSpacing.space2),
+                child: Text(
+                  note!,
+                  style: SaloniTextStyles.caption.copyWith(
+                    fontSize: 12,
+                    height: 18 / 12,
+                    color: c.inkSubtle,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dot(Color color) => Container(
+    height: 8,
+    decoration: BoxDecoration(color: color, borderRadius: SaloniRadius.fullAll),
+  );
+}

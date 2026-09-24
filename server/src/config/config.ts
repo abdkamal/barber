@@ -189,3 +189,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
+
+/** Loads ./.env into process.env when present (real environment variables take precedence). */
+export function loadDotEnv(path = '.env'): void {
+  try {
+    const before = { ...process.env };
+    process.loadEnvFile(path);
+    Object.assign(process.env, before);
+  } catch {
+    /* no .env file — rely on the environment */
+  }
+}

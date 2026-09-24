@@ -157,13 +157,16 @@ class StatusBadge extends StatelessWidget {
               SaloniIcon(spec.icon!, size: iconSize, color: fg),
               SizedBox(width: small ? 4 : 6),
             ],
-            Text(
-              text,
-              style:
-                  (small
-                          ? SaloniTextStyles.caption
-                          : SaloniTextStyles.label)
-                      .copyWith(color: fg, height: 1, fontWeight: FontWeight.w500),
+            Flexible(
+              child: Text(
+                text,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    (small
+                            ? SaloniTextStyles.caption
+                            : SaloniTextStyles.label)
+                        .copyWith(color: fg, height: 1, fontWeight: FontWeight.w500),
+              ),
             ),
           ],
         ),

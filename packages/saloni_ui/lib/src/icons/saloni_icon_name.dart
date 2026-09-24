@@ -1,5 +1,5 @@
 import 'package:flutter/widgets.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
+import 'package:phosphor_icons/phosphor_icons.dart';
 
 /// Icon-name tokens, mirroring `IconName` in
 /// `design/design-system/components/index.d.ts`. Rendered with Phosphor

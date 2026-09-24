@@ -13,7 +13,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  phosphor_flutter: ^2.1.0
+  # ملاحظة: phosphor_flutter 2.1.0 (آخر إصدار منشور) غير متوافق مع Flutter
+  # الحالي (IconData أصبحت final class في Flutter 3.43+). نستخدم phosphor_icons
+  # بدلًا منه — منفذ لنفس الحزمة (نفس الأسماء والأيقونات: PhosphorIconsRegular
+  # إلخ) محدَّث لهذا التغيير. راجع README للتفاصيل.
+  phosphor_icons: ^3.0.1
 
 dev_dependencies:
   flutter_test:

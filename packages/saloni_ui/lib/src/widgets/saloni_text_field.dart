@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../icons/saloni_icon_name.dart';
 import '../theme/saloni_theme.dart';
