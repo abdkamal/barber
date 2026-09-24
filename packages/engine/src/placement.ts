@@ -1,5 +1,5 @@
 import { DEFAULT_POLICY, gapBuffer, type PolicySettings } from './policy.js';
-import { projectQueue, type ProjectOptions } from './timeline.js';
+import { blockingBreaks, projectQueue, type ProjectOptions } from './timeline.js';
 import type { BarberDay, BookingKind, Ms, ProjectedSlot, Queue, QueueEntry } from './types.js';
 
 export interface PlacementRequest {
@@ -65,7 +65,14 @@ export function findPlacement(day: BarberDay, queue: Queue, now: Ms, req: Placem
     if (mine.end > day.workEnd) continue;
     if (slots.some((s) => s.bookingId !== NEW_ID && s.start > baseline.get(s.bookingId)!.start)) continue;
     const next = slots[p + 1];
-    if (next && next.start - mine.end < buffer) continue;
+    if (next) {
+      // ق19: the slack protecting whoever follows ends at the next booking or
+      // at a break in between, whichever comes first.
+      const breakAfter = blockingBreaks(day.breaks, !!req.walkIn)
+        .filter((b) => b.start >= mine.end && b.start < next.start)
+        .reduce((m, b) => Math.min(m, b.start), Infinity);
+      if (Math.min(next.start, breakAfter) - mine.end < buffer) continue;
+    }
     if (!best || mine.start <= best.start) best = { position: p, start: mine.start, end: mine.end };
   }
   return best;

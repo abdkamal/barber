@@ -73,11 +73,26 @@ describe('projectQueue (design §5.1)', () => {
     expect(slots[1]!.start).toBe(t(10, 45));
   });
 
-  it('freezes on estimates when the barber is offline (design §4)', () => {
+  it('freezes on estimates when the barber is offline (design §4), but never projects into the past', () => {
     const queue = [q('a', 30, { status: 'in_service', actualStart: t(10) }), q('b', 20)];
-    const slots = projectQueue(day(), queue, t(11, 30), { frozenAt: t(10, 5) });
-    expect(slots[0]!.end).toBe(t(10, 30));
-    expect(slots[1]!.start).toBe(t(10, 30));
+    expect(projectQueue(day(), queue, t(10, 20), { frozenAt: t(10, 5) })[1]!.start).toBe(t(10, 30));
+    const late = projectQueue(day(), queue, t(11, 30), { frozenAt: t(10, 5) });
+    expect(late[0]!.end).toBe(t(10, 30)); // overrun not stretched
+    expect(late[1]!.start).toBe(t(11, 30)); // not in the past
+  });
+
+  it('review I2: an offline barber\'s new booking never gets a past ETA', () => {
+    const c = { day: day(), queue: [q('a', 30)], state: { kind: 'offline', offlineSince: t(10), knownWorkEnd: t(12, 30) } as const, duration: min(30) };
+    expect(placeWithBarber(c, t(11), { kind: 'queue' })!.start).toBeGreaterThanOrEqual(t(11));
+  });
+
+  it('review I3: a service running into a break pushes the break later (§5.1)', () => {
+    const d = day({ breaks: [{ start: t(12), end: t(13) }] });
+    const queue = [q('a', 30, { status: 'in_service', actualStart: t(11, 30) }), q('b', 30)];
+    expect(projectQueue(d, queue, t(12, 20))[1]!.start).toBe(t(13, 20));
+    // Walk-in-only windows are not the barber's rest and are not moved.
+    const w = day({ breaks: [{ start: t(12), end: t(13), kind: 'walk_in_only' }] });
+    expect(projectQueue(w, [q('a', 30, { status: 'in_service', actualStart: t(11, 30) }), q('b', 30, { walkIn: true })], t(12, 20))[1]!.start).toBe(t(12, 20));
   });
 
   it('waits for a requested hour and never straddles a break', () => {
@@ -124,6 +139,14 @@ describe('findPlacement — ق4 nobody is delayed, ق19 gap buffer', () => {
     // 75 min service: buffer max(10, 18.75) ≈ 19 → needs 94 > 90 → appended after r.
     expect(findPlacement(day(), queue, t(9), { kind: 'queue', duration: min(75) })).toMatchObject({ position: 2, start: t(11, 30) });
     expect(gapBuffer(min(75))).toBe(min(18.75));
+  });
+
+  it('review I4: the ق19 margin also applies when a break closes the gap', () => {
+    const d = day({ breaks: [{ start: t(12), end: t(13) }] });
+    const queue = [q('a', 150), req('r', 30, t(13))]; // a: 9:00–11:30, r at 13:00 after the break
+    const p = findPlacement(d, queue, t(9), { kind: 'queue', duration: min(30) });
+    expect(p!.position).toBe(2); // not squeezed into 11:30–12:00 with zero margin
+    expect(findPlacement(d, queue, t(9), { kind: 'queue', duration: min(15) })!.position).toBe(1); // 11:30–11:45 leaves 15 ≥ 10
   });
 
   it('never goes ahead of the customer in service or the one called', () => {

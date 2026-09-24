@@ -67,26 +67,48 @@ export interface ProjectOptions {
  *
  * - The booking in service ends at `actualStart + estimate`, or `now` if it
  *   has already overrun and the barber is live (never ended automatically).
+ *   When frozen (barber not live), the overrun is not stretched — the server
+ *   cannot see it — but no waiting booking is ever projected into the past.
+ * - A service that runs into a break pushes that break later by the overlap:
+ *   the barber still takes the full break after finishing (design §5.1).
  * - Everyone else starts when the previous one ends, not before opening time,
- *   not before their requested hour, and never across a break that blocks them.
+ *   not before `now`, not before their requested hour, and never across a
+ *   break that blocks them.
  */
 export function projectQueue(day: BarberDay, queue: Queue, now: Ms, opts: ProjectOptions = {}): ProjectedSlot[] {
   const live = opts.frozenAt === undefined;
-  const ref = live ? now : opts.frozenAt!;
   const slots: ProjectedSlot[] = [];
-  let cursor = Math.max(ref, day.workStart);
+  let effectiveDay = day;
+  let cursor = Math.max(now, day.workStart);
   for (const e of queue) {
     if (e.status === 'in_service') {
       const start = e.actualStart!;
       const end = live ? Math.max(start + e.estimatedDuration, now) : start + e.estimatedDuration;
       slots.push({ bookingId: e.bookingId, start, end });
       cursor = Math.max(cursor, end);
+      effectiveDay = { ...day, breaks: shiftOverrunBreak(day.breaks, start, end) };
       continue;
     }
-    slots.push(slotFor(e, cursor, day));
+    slots.push(slotFor(e, cursor, effectiveDay));
     cursor = slots[slots.length - 1]!.end;
   }
   return slots;
+}
+
+/**
+ * The first real break (not a walk-in-only window) that a running service
+ * overlaps is moved to start when the service ends, keeping its full length.
+ */
+export function shiftOverrunBreak(breaks: readonly Break[], serviceStart: Ms, serviceEnd: Ms): Break[] {
+  let shifted = false;
+  return breaks.map((b) => {
+    if (shifted || b.kind === 'walk_in_only') return b;
+    if (serviceStart < b.start && serviceEnd > b.start) {
+      shifted = true;
+      return { ...b, start: serviceEnd, end: serviceEnd + (b.end - b.start) };
+    }
+    return b;
+  });
 }
 
 function slotFor(e: QueueEntry, cursor: Ms, day: BarberDay): ProjectedSlot {
@@ -99,7 +121,7 @@ function slotFor(e: QueueEntry, cursor: Ms, day: BarberDay): ProjectedSlot {
 /** Projected end of all work in the queue (or `now`/opening if empty). */
 export function queueEnd(day: BarberDay, queue: Queue, now: Ms, opts: ProjectOptions = {}): Ms {
   const slots = projectQueue(day, queue, now, opts);
-  return slots.length ? slots[slots.length - 1]!.end : Math.max(opts.frozenAt ?? now, day.workStart);
+  return slots.length ? slots[slots.length - 1]!.end : Math.max(now, day.workStart);
 }
 
 /** ق24: accepted bookings now projected to end after closing. */
