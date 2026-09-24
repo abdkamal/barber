@@ -42,7 +42,7 @@ class SaloniAvatar extends StatelessWidget {
         child: Text(
           _initials(name),
           style: TextStyle(
-            fontFamily: SaloniFonts.display,
+            fontFamily: SaloniFonts.displayFamily,
             fontWeight: FontWeight.w600,
             fontSize: (size * 0.38).roundToDouble(),
             color: fg,

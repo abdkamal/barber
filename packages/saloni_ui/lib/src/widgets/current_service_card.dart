@@ -121,7 +121,7 @@ class CurrentServiceCard extends StatelessWidget {
                     child: Text.rich(
                       TextSpan(
                         style: TextStyle(
-                          fontFamily: SaloniFonts.display,
+                          fontFamily: SaloniFonts.displayFamily,
                           fontSize: 40,
                           height: 44 / 40,
                           fontWeight: FontWeight.w500,

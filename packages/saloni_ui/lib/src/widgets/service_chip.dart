@@ -128,7 +128,7 @@ class _ServiceChipState extends State<ServiceChip> {
                   child: Text(
                     '${widget.price} ',
                     style: TextStyle(
-                      fontFamily: SaloniFonts.display,
+                      fontFamily: SaloniFonts.displayFamily,
                       fontWeight: FontWeight.w500,
                       color: c.ink,
                     ),
@@ -137,7 +137,7 @@ class _ServiceChipState extends State<ServiceChip> {
                 Text(
                   widget.currency,
                   style: TextStyle(
-                    fontFamily: SaloniFonts.display,
+                    fontFamily: SaloniFonts.displayFamily,
                     fontWeight: FontWeight.w500,
                     color: c.ink,
                   ),

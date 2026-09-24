@@ -65,7 +65,7 @@ class QueueItem extends StatelessWidget {
               child: Text(
                 '$position',
                 style: TextStyle(
-                  fontFamily: SaloniFonts.display,
+                  fontFamily: SaloniFonts.displayFamily,
                   fontWeight: FontWeight.w600,
                   color: _called ? c.warning : c.inkMuted,
                   fontFeatures: const [FontFeature.tabularFigures()],
@@ -86,7 +86,7 @@ class QueueItem extends StatelessWidget {
                       Text(
                         name,
                         style: TextStyle(
-                          fontFamily: SaloniFonts.display,
+                          fontFamily: SaloniFonts.displayFamily,
                           fontWeight: FontWeight.w600,
                           fontSize: 16,
                           height: 24 / 16,
@@ -125,7 +125,7 @@ class QueueItem extends StatelessWidget {
                       eta,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontFamily: SaloniFonts.display,
+                        fontFamily: SaloniFonts.displayFamily,
                         fontSize: 18,
                         fontWeight: FontWeight.w500,
                         height: 26 / 18,

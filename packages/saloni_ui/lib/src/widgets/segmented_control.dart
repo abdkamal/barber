@@ -135,7 +135,7 @@ class _Segment extends StatelessWidget {
                 Text(
                   option.label,
                   style: TextStyle(
-                    fontFamily: SaloniFonts.text,
+                    fontFamily: SaloniFonts.textFamily,
                     fontSize: 15,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                     color: selected ? c.ink : c.inkMuted,

@@ -92,7 +92,7 @@ class BarberOption extends StatelessWidget {
                       Text(
                         title,
                         style: TextStyle(
-                          fontFamily: SaloniFonts.display,
+                          fontFamily: SaloniFonts.displayFamily,
                           fontWeight: FontWeight.w600,
                           fontSize: 17,
                           height: 26 / 17,
@@ -118,7 +118,7 @@ class BarberOption extends StatelessWidget {
                         child: Text(
                           nextAt!,
                           style: TextStyle(
-                            fontFamily: SaloniFonts.display,
+                            fontFamily: SaloniFonts.displayFamily,
                             fontSize: 20,
                             fontWeight: FontWeight.w500,
                             height: 28 / 20,

@@ -24,3 +24,13 @@ List<String> parseStringList(Object? value) {
   if (value == null) return const [];
   return (value as List).map((e) => e as String).toList(growable: false);
 }
+
+/// رقم صحيح من قيمة JSON (يقبل `num`)، أو `null`.
+int? asIntOrNull(Object? value) => value is num ? value.round() : null;
+
+/// نص من قيمة JSON، أو `null`.
+String? asStringOrNull(Object? value) => value?.toString();
+
+/// خريطة JSON من قيمة، أو خريطة فارغة.
+Map<String, dynamic> asMap(Object? value) =>
+    value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};

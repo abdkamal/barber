@@ -1,4 +1,11 @@
+import 'json_utils.dart';
+
 /// خدمة قابلة للحجز — design.md §2 (`services`).
+///
+/// الشكل في `GET /customer/today` و`GET /staff/today`:
+/// `{id, name, baseDurationMin, priceCents, active}`. يقبل `fromJson` أيضًا شكل
+/// `/manager/services` (`durationMinutes`, `price`, `position`) وشكل الملف
+/// العام (`durationMin`, `price`).
 class Service {
   const Service({
     required this.id,
@@ -6,6 +13,7 @@ class Service {
     required this.baseDurationMin,
     required this.priceCents,
     this.active = true,
+    this.position,
   });
 
   final String id;
@@ -13,13 +21,18 @@ class Service {
   final int baseDurationMin;
   final int priceCents;
   final bool active;
+  final int? position;
 
   factory Service.fromJson(Map<String, dynamic> json) => Service(
         id: json['id'] as String,
         name: json['name'] as String,
-        baseDurationMin: json['baseDurationMin'] as int,
-        priceCents: json['priceCents'] as int,
+        baseDurationMin: asIntOrNull(json['baseDurationMin'] ??
+                json['durationMinutes'] ??
+                json['durationMin']) ??
+            0,
+        priceCents: asIntOrNull(json['priceCents'] ?? json['price']) ?? 0,
         active: json['active'] as bool? ?? true,
+        position: asIntOrNull(json['position']),
       );
 
   Map<String, dynamic> toJson() => {
@@ -28,5 +41,6 @@ class Service {
         'baseDurationMin': baseDurationMin,
         'priceCents': priceCents,
         'active': active,
+        if (position != null) 'position': position,
       };
 }

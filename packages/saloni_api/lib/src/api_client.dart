@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:uuid/uuid.dart';
 
 import 'models/json_utils.dart';
@@ -38,8 +39,25 @@ class ApiClient {
   final StreamController<void> _signedOutController =
       StreamController<void>.broadcast();
 
-  /// يصدر حدثًا عند تعذّر تجديد الجلسة (يجب على التطبيق تسجيل خروج المستخدم).
+  /// يصدر حدثًا عندما يرفض السيرفر تجديد الجلسة (رمز تجديد منتهٍ أو ملغى أو
+  /// حساب موقوف) — يجب على التطبيق حينها إعادة المستخدم لشاشة الدخول.
+  ///
+  /// **لا** يصدر عند فشل الشبكة أثناء التجديد: تبقى الجلسة محفوظة ويُرمى
+  /// `ApiError` قابل لإعادة المحاولة (`isNetwork`).
   Stream<void> get onSignedOut => _signedOutController.stream;
+
+  /// الجلسة الحالية في الذاكرة (بعد الدخول أو `restoreSession`)، إن وُجدت.
+  Session? get currentSession => _session;
+
+  /// يحوّل رابط وسائط نسبيًا يعيده السيرفر (`/v1/media/{code}/{file}`) إلى
+  /// رابط كامل على عنوان السيرفر. الروابط الكاملة تُعاد كما هي.
+  String? resolveMediaUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+    final parsed = Uri.tryParse(url);
+    if (parsed == null) return null;
+    if (parsed.hasScheme) return url;
+    return baseUri.resolveUri(Uri(path: parsed.path, query: parsed.hasQuery ? parsed.query : null)).toString();
+  }
 
   /// يُستدعى بعد دخول ناجح لحفظ الجلسة في الذاكرة والمخزن الآمن.
   Future<void> setSession(Session session, {required bool rememberMe}) async {
@@ -84,15 +102,24 @@ class ApiClient {
   // ------------------------------------------------------------------
 
   Future<SalonPublicProfile> getSalonProfile(String code) async {
-    final json = await _send('GET', '/salons/$code', authRequired: false);
+    final json = await _send('GET', '/salons/${Uri.encodeComponent(code)}',
+        authRequired: false);
     return SalonPublicProfile.fromJson(json as Map<String, dynamic>);
   }
 
-  Future<Map<String, dynamic>> registerSalon(
-      Map<String, dynamic> ownerAndSalon) async {
+  /// تسجيل صالون جديد (ق37): `{salon: {name, timezone, currency, phone?,
+  /// address?, about?}, owner: {name, username, password}}`. المالك يدخل
+  /// كمدير مباشرة (تُحفظ الجلسة) وصالونه `pending_activation`.
+  Future<SalonRegistration> registerSalon({
+    required Map<String, dynamic> salon,
+    required Map<String, dynamic> owner,
+    bool rememberMe = true,
+  }) async {
     final json = await _send('POST', '/salons/register',
-        body: ownerAndSalon, authRequired: false);
-    return json as Map<String, dynamic>;
+        body: {'salon': salon, 'owner': owner}, authRequired: false);
+    final reg = SalonRegistration.fromJson(json as Map<String, dynamic>);
+    await setSession(reg.session, rememberMe: rememberMe);
+    return reg;
   }
 
   // ------------------------------------------------------------------
@@ -149,6 +176,12 @@ class ApiClient {
     return session;
   }
 
+  /// حالة الجلسة الحالية (`GET /auth/session`) — مثل انتهاء «بانتظار التفعيل».
+  Future<SessionInfo> getSessionInfo() async {
+    final json = await _send('GET', '/auth/session');
+    return SessionInfo.fromJson(json as Map<String, dynamic>);
+  }
+
   Future<void> requestPasswordReset({
     required String salonCode,
     required String identifier,
@@ -167,9 +200,9 @@ class ApiClient {
   // الزبون
   // ------------------------------------------------------------------
 
-  Future<Map<String, dynamic>> getCustomerToday() async {
+  Future<CustomerToday> getCustomerToday() async {
     final json = await _send('GET', '/customer/today');
-    return json as Map<String, dynamic>;
+    return CustomerToday.fromJson(json as Map<String, dynamic>);
   }
 
   Future<Quote> getQuote({
@@ -220,9 +253,18 @@ class ApiClient {
     await _send('DELETE', '/offers/$offerId');
   }
 
-  Future<CurrentBooking> getCurrentBooking() async {
-    final json = await _send('GET', '/bookings/current');
-    return CurrentBooking.fromJson(json as Map<String, dynamic>);
+  /// الحجز النشط، أو `null` إن لم يوجد (`{"booking": null}`؛ ويُقبل
+  /// `404 NO_ACTIVE_BOOKING` من إصدارات سابقة للسيرفر).
+  Future<CurrentBooking?> getCurrentBooking() async {
+    final dynamic json;
+    try {
+      json = await _send('GET', '/bookings/current');
+    } on ApiError catch (e) {
+      if (e.code == 'NO_ACTIVE_BOOKING') return null;
+      rethrow;
+    }
+    if (json is! Map<String, dynamic> || json['booking'] == null) return null;
+    return CurrentBooking.fromJson(json);
   }
 
   /// يبلّغ السيرفر بما عرضه التطبيق فعلًا — مرجع التنبيه الإلزامي (ق5).
@@ -232,6 +274,10 @@ class ApiClient {
     });
   }
 
+  /// تعديل الوقت (§5.12): نقل ذري عند الإمكان ويعيد الحجز بوقته الجديد.
+  /// إن تعذّرت الساعة المطلوبة يُرمى `ApiError` (`409 SLOT_UNAVAILABLE`)
+  /// ويبقى الحجز كما هو، و`error.changeTimeOffer` أقرب وقت محجوز مؤقتًا —
+  /// قبوله `createBooking(offerId: …)` ورفضه `rejectOffer`.
   Future<Booking> changeBookingTime({
     required String bookingId,
     required BookingKind kind,
@@ -250,14 +296,16 @@ class ApiClient {
     return Booking.fromJson(json as Map<String, dynamic>);
   }
 
-  Future<void> cancelBooking(String bookingId, {String? idempotencyKey}) async {
-    await _send('POST', '/bookings/$bookingId/cancel',
+  Future<Booking?> cancelBooking(String bookingId,
+      {String? idempotencyKey}) async {
+    final json = await _send('POST', '/bookings/$bookingId/cancel',
         idempotencyKey: idempotencyKey ?? newIdempotencyKey());
+    return json is Map<String, dynamic> ? Booking.fromJson(json) : null;
   }
 
-  Future<List<dynamic>> getCustomerHistory() async {
+  Future<List<HistoryVisit>> getCustomerHistory() async {
     final json = await _send('GET', '/customer/history');
-    return json as List<dynamic>;
+    return parseList(json, HistoryVisit.fromJson);
   }
 
   Future<void> registerDevice({
@@ -286,10 +334,7 @@ class ApiClient {
     final json = await _send('POST', '/sync/events', body: {
       'events': events.map((e) => e.toJson()).toList(),
     });
-    final list = json as List<dynamic>;
-    return list
-        .map((e) => SyncEventOutcome.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return parseList(json, SyncEventOutcome.fromJson);
   }
 
   Future<SyncPullResult> pullSync(int since) async {
@@ -297,11 +342,13 @@ class ApiClient {
     return SyncPullResult.fromJson(json as Map<String, dynamic>);
   }
 
-  Future<void> heartbeat({required int deviceSeq, required String queueDigest}) async {
-    await _send('POST', '/heartbeat', body: {
+  /// نبضة كل 30 ث (design.md §4). `deviceSeq` = آخر رقم تسلسل استخدمه الجهاز
+  /// (لا يُستهلك رقم جديد للنبضة).
+  Future<HeartbeatResult> heartbeat({required int deviceSeq}) async {
+    final json = await _send('POST', '/heartbeat', body: {
       'deviceSeq': deviceSeq,
-      'queueDigest': queueDigest,
     });
+    return HeartbeatResult.fromJson(json as Map<String, dynamic>);
   }
 
   /// إضافة زبون حاضر — متصل فقط (design.md §6). لا تُستدعى مطلقًا في وضع
@@ -321,7 +368,7 @@ class ApiClient {
     return Booking.fromJson(json as Map<String, dynamic>);
   }
 
-  Future<Map<String, dynamic>> getStaffImpact({
+  Future<StaffImpact> getStaffImpact({
     required String bookingId,
     required List<String> serviceIds,
   }) async {
@@ -329,20 +376,20 @@ class ApiClient {
       'bookingId': bookingId,
       'serviceIds': serviceIds,
     });
-    return json as Map<String, dynamic>;
+    return StaffImpact.fromJson(json as Map<String, dynamic>);
   }
 
   Future<List<Payment>> getStaffPayments() async {
     final json = await _send('GET', '/staff/payments');
-    return (json as List<dynamic>)
-        .map((e) => Payment.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return parseList(json, Payment.fromJson);
   }
 
   // ------------------------------------------------------------------
-  // المدير — لا نماذج مخصّصة مطلوبة؛ تمرير JSON خام (انظر README).
+  // المدير — ملف الصالون والصور
   // ------------------------------------------------------------------
 
+  /// `{code, name, about, logo, photos[{id,url,position}], address, location,
+  /// phone, whatsapp, socialLinks[{platform,url}], updatedAt}`.
   Future<Map<String, dynamic>> getManagerProfile() async =>
       await _send('GET', '/manager/profile') as Map<String, dynamic>;
 
@@ -351,12 +398,33 @@ class ApiClient {
       await _send('PUT', '/manager/profile', body: body)
           as Map<String, dynamic>;
 
-  Future<Map<String, dynamic>> addManagerPhoto(Map<String, dynamic> body) async =>
-      await _send('POST', '/manager/photos', body: body)
-          as Map<String, dynamic>;
+  /// رفع صورة للمعرض (حتى 6) — `multipart/form-data` بحقل `file`.
+  Future<SalonPhotoUpload> uploadManagerPhoto({
+    required List<int> bytes,
+    required String filename,
+    String? contentType,
+  }) async {
+    final json = await _send('POST', '/manager/photos',
+        file: _Upload(bytes, filename, contentType));
+    return SalonPhotoUpload.fromJson(json as Map<String, dynamic>);
+  }
 
   Future<void> deleteManagerPhoto(String id) async =>
       await _send('DELETE', '/manager/photos/$id');
+
+  /// رفع شعار الصالون ← `{logo: url, path}`.
+  Future<Map<String, dynamic>> uploadManagerLogo({
+    required List<int> bytes,
+    required String filename,
+    String? contentType,
+  }) async =>
+      await _send('POST', '/manager/profile/logo',
+          file: _Upload(bytes, filename, contentType)) as Map<String, dynamic>;
+
+  Future<void> deleteManagerLogo() async =>
+      await _send('DELETE', '/manager/profile/logo');
+
+  // ---- الكتالوج والخدمات ----
 
   Future<List<dynamic>> getManagerCatalog() async =>
       await _send('GET', '/manager/catalog') as List<dynamic>;
@@ -374,9 +442,25 @@ class ApiClient {
   Future<void> deleteManagerCatalogItem(String id) async =>
       await _send('DELETE', '/manager/catalog/$id');
 
+  /// صورة عنصر كتالوج ← `{photo}`.
+  Future<Map<String, dynamic>> uploadManagerCatalogPhoto(
+    String id, {
+    required List<int> bytes,
+    required String filename,
+    String? contentType,
+  }) async =>
+      await _send('POST', '/manager/catalog/$id/photo',
+          file: _Upload(bytes, filename, contentType)) as Map<String, dynamic>;
+
+  Future<void> deleteManagerCatalogPhoto(String id) async =>
+      await _send('DELETE', '/manager/catalog/$id/photo');
+
+  /// `[{id, name, durationMinutes, price, active, position}]` — تُقرأ أيضًا عبر
+  /// `Service.fromJson`.
   Future<List<dynamic>> getManagerServices() async =>
       await _send('GET', '/manager/services') as List<dynamic>;
 
+  /// `{name, durationMinutes, price}`.
   Future<Map<String, dynamic>> createManagerService(
           Map<String, dynamic> body) async =>
       await _send('POST', '/manager/services', body: body)
@@ -390,9 +474,12 @@ class ApiClient {
   Future<void> deleteManagerService(String id) async =>
       await _send('DELETE', '/manager/services/$id');
 
+  // ---- الطاقم ----
+
   Future<List<dynamic>> getManagerStaff() async =>
       await _send('GET', '/manager/staff') as List<dynamic>;
 
+  /// `{name, username, password, role: barber|manager}`.
   Future<Map<String, dynamic>> createManagerStaff(
           Map<String, dynamic> body) async =>
       await _send('POST', '/manager/staff', body: body)
@@ -407,29 +494,56 @@ class ApiClient {
       await _send('POST', '/manager/staff/$id/reset-code')
           as Map<String, dynamic>;
 
+  // ---- الدوام والاستراحات والإجازات ----
+
+  /// `[{staffId | null, weekday (0=الأحد), opensAt, closesAt}]`.
   Future<List<dynamic>> getManagerSchedules() async =>
       await _send('GET', '/manager/schedules') as List<dynamic>;
 
-  Future<Map<String, dynamic>> upsertManagerSchedule(
-          Map<String, dynamic> body) async =>
-      await _send('POST', '/manager/schedules', body: body)
-          as Map<String, dynamic>;
+  /// يضبط دوام يوم (`PUT /manager/schedules`). `staffId: null` = دوام الصالون
+  /// الافتراضي لذلك اليوم. `weekday`: 0 = الأحد … 6 = السبت (انظر
+  /// [serverWeekday]). `closesAt <= opensAt` = يعبر منتصف الليل (ق30).
+  Future<Map<String, dynamic>> putManagerSchedule({
+    String? staffId,
+    required int weekday,
+    required String opensAt,
+    required String closesAt,
+  }) async =>
+      await _send('PUT', '/manager/schedules', body: {
+        'staffId': staffId,
+        'weekday': weekday,
+        'opensAt': opensAt,
+        'closesAt': closesAt,
+      }) as Map<String, dynamic>;
+
+  Future<void> deleteManagerSchedule(int weekday, {String? staffId}) async =>
+      await _send('DELETE',
+          '/manager/schedules/$weekday${staffId == null ? '' : '?staffId=$staffId'}');
 
   Future<List<dynamic>> getManagerBreaks() async =>
       await _send('GET', '/manager/breaks') as List<dynamic>;
 
-  Future<Map<String, dynamic>> upsertManagerBreak(
-          Map<String, dynamic> body) async =>
-      await _send('POST', '/manager/breaks', body: body)
-          as Map<String, dynamic>;
+  /// `{staffId | 'all', type, startTime/endTime (متكررة) أو workDate/startsAt/endsAt}`
+  /// ← الاستراحات المنشأة (واحدة لكل حلاق عند `all`).
+  Future<List<dynamic>> createManagerBreak(Map<String, dynamic> body) async =>
+      await _send('POST', '/manager/breaks', body: body) as List<dynamic>;
+
+  Future<void> deleteManagerBreak(String id) async =>
+      await _send('DELETE', '/manager/breaks/$id');
 
   Future<List<dynamic>> getManagerAbsences() async =>
       await _send('GET', '/manager/absences') as List<dynamic>;
 
-  Future<Map<String, dynamic>> upsertManagerAbsence(
+  /// `{staffId, workDate, reason?}`.
+  Future<Map<String, dynamic>> createManagerAbsence(
           Map<String, dynamic> body) async =>
       await _send('POST', '/manager/absences', body: body)
           as Map<String, dynamic>;
+
+  Future<void> deleteManagerAbsence(String id) async =>
+      await _send('DELETE', '/manager/absences/$id');
+
+  // ---- الإعدادات ----
 
   Future<Map<String, dynamic>> getManagerSettings() async =>
       await _send('GET', '/manager/settings') as Map<String, dynamic>;
@@ -439,8 +553,22 @@ class ApiClient {
       await _send('PUT', '/manager/settings', body: body)
           as Map<String, dynamic>;
 
-  Future<List<dynamic>> getManagerCustomers() async =>
-      await _send('GET', '/manager/customers') as List<dynamic>;
+  // ---- الزبائن ----
+
+  Future<List<dynamic>> getManagerCustomers({
+    String? status,
+    int? limit,
+    int? offset,
+  }) async {
+    final query = [
+      if (status != null) 'status=${Uri.encodeQueryComponent(status)}',
+      if (limit != null) 'limit=$limit',
+      if (offset != null) 'offset=$offset',
+    ].join('&');
+    return await _send(
+            'GET', '/manager/customers${query.isEmpty ? '' : '?$query'}')
+        as List<dynamic>;
+  }
 
   Future<void> approveCustomer(String id) async =>
       await _send('POST', '/manager/customers/$id/approve');
@@ -456,29 +584,45 @@ class ApiClient {
       await _send('POST', '/manager/customers/$customerId/link-walkin',
           body: {'walkInId': walkInId});
 
+  /// أرقام لها أكثر من سجل حاضر غير مربوط (ق20).
+  Future<List<PhoneDispute>> getPhoneDisputes() async =>
+      parseList(await _send('GET', '/manager/phone-disputes'),
+          PhoneDispute.fromJson);
+
+  /// يحل النزاع بربط سجل الحاضر المختار بحساب التطبيق صاحب الرقم.
   Future<void> resolvePhoneDispute(
-          String disputeId, Map<String, dynamic> resolution) async =>
-      await _send('POST', '/manager/phone-disputes/$disputeId/resolve',
-          body: resolution);
+          {required String accountId, required String walkInId}) async =>
+      await _send('POST', '/manager/phone-disputes/$accountId/resolve',
+          body: {'walkInId': walkInId});
 
-  Future<List<dynamic>> getManagerQueues() async =>
-      await _send('GET', '/manager/queues') as List<dynamic>;
+  // ---- الطوابير والنقل (ق25) ----
 
-  Future<void> transferBooking({
+  Future<ManagerQueues> getManagerQueues() async => ManagerQueues.fromJson(
+      await _send('GET', '/manager/queues') as Map<String, dynamic>);
+
+  /// نقل حجز إلى حلاق آخر ← الحجز بوقته الجديد. إن لم يتسع وقت الحلاق يُرمى
+  /// `ApiError` (`409 TRANSFER_NO_SLOT`) و`error.transferAlternatives` البدائل.
+  Future<Booking> transferBooking({
     required String bookingId,
     required String toBarberId,
     String? idempotencyKey,
   }) async =>
-      await _send('POST', '/manager/bookings/$bookingId/transfer',
+      Booking.fromJson(await _send(
+          'POST', '/manager/bookings/$bookingId/transfer',
           body: {'toBarberId': toBarberId},
-          idempotencyKey: idempotencyKey ?? newIdempotencyKey());
+          idempotencyKey: idempotencyKey ?? newIdempotencyKey())
+          as Map<String, dynamic>);
 
+  // ---- التقارير (§9) ----
+
+  /// تقارير نطاق أيام عمل (تاريخ الصالون المحلي، شاملًا الطرفين). يُرسل
+  /// التاريخ فقط `YYYY-MM-DD` من مكوّنات [from]/[to] كما هي (دون تحويل منطقة).
   Future<Map<String, dynamic>> getManagerReports({
     required DateTime from,
     required DateTime to,
   }) async =>
       await _send('GET',
-          '/manager/reports?from=${toIso(from)}&to=${toIso(to)}')
+              '/manager/reports?from=${workDateOf(from)}&to=${workDateOf(to)}')
           as Map<String, dynamic>;
 
   // ------------------------------------------------------------------
@@ -491,8 +635,10 @@ class ApiClient {
     Map<String, dynamic>? body,
     String? idempotencyKey,
     bool authRequired = true,
+    _Upload? file,
   }) async {
-    Session? session = authRequired ? (_session ??= await tokenStore.read()) : _session;
+    Session? session =
+        authRequired ? (_session ??= await tokenStore.read()) : _session;
     if (authRequired && session == null) {
       throw ApiError.signedOut();
     }
@@ -501,68 +647,85 @@ class ApiClient {
           method,
           path,
           body: body,
+          file: file,
           idempotencyKey: idempotencyKey,
           accessToken: authRequired ? session!.accessToken : null,
         );
 
-    http.Response response;
-    try {
-      response = await attempt();
-    } on TimeoutException {
-      throw ApiError.timeout();
-    } catch (e) {
-      throw ApiError.network(e.toString());
-    }
+    var response = await _guard(attempt);
 
     if (response.statusCode == 401 && authRequired) {
+      // يرمي ApiError قابلًا لإعادة المحاولة إن تعذّر الوصول للسيرفر.
       final refreshed = await _refreshSession();
       if (refreshed == null) {
         _signedOutController.add(null);
         throw ApiError.signedOut();
       }
       session = refreshed;
-      try {
-        response = await attempt();
-      } on TimeoutException {
-        throw ApiError.timeout();
-      } catch (e) {
-        throw ApiError.network(e.toString());
-      }
+      response = await _guard(attempt);
     }
 
     return _decode(response);
+  }
+
+  Future<http.Response> _guard(Future<http.Response> Function() run) async {
+    try {
+      return await run();
+    } on TimeoutException {
+      throw ApiError.timeout();
+    } on ApiError {
+      rethrow;
+    } catch (e) {
+      throw ApiError.network(e.toString());
+    }
+  }
+
+  Uri _uri(String path) {
+    final fullPath = '${baseUri.path}$path';
+    final qIndex = fullPath.indexOf('?');
+    return qIndex == -1
+        ? baseUri.replace(path: fullPath)
+        : baseUri.replace(
+            path: fullPath.substring(0, qIndex),
+            query: fullPath.substring(qIndex + 1),
+          );
   }
 
   Future<http.Response> _rawSend(
     String method,
     String path, {
     Map<String, dynamic>? body,
+    _Upload? file,
     String? idempotencyKey,
     String? accessToken,
-  }) {
-    final fullPath = '${baseUri.path}$path';
-    final qIndex = fullPath.indexOf('?');
-    final uri = qIndex == -1
-        ? baseUri.replace(path: fullPath)
-        : baseUri.replace(
-            path: fullPath.substring(0, qIndex),
-            query: fullPath.substring(qIndex + 1),
-          );
+  }) async {
+    final uri = _uri(path);
     final headers = <String, String>{
-      'Content-Type': 'application/json; charset=utf-8',
       'Accept': 'application/json',
       if (accessToken != null) 'Authorization': 'Bearer $accessToken',
       if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey,
     };
-    final encodedBody = body == null ? null : jsonEncode(body);
-    final request = switch (method) {
-      'GET' => _http.get(uri, headers: headers),
-      'POST' => _http.post(uri, headers: headers, body: encodedBody),
-      'PUT' => _http.put(uri, headers: headers, body: encodedBody),
-      'DELETE' => _http.delete(uri, headers: headers, body: encodedBody),
-      _ => throw ArgumentError('Unsupported method $method'),
-    };
-    return request.timeout(timeout);
+    final http.BaseRequest request;
+    if (file != null) {
+      final multipart = http.MultipartRequest(method, uri)
+        ..headers.addAll(headers)
+        ..files.add(http.MultipartFile.fromBytes(
+          'file',
+          file.bytes,
+          filename: file.filename,
+          contentType: file.mediaType,
+        ));
+      request = multipart;
+    } else {
+      final plain = http.Request(method, uri)..headers.addAll(headers);
+      if (body != null) {
+        plain.headers['Content-Type'] = 'application/json; charset=utf-8';
+        plain.bodyBytes = utf8.encode(jsonEncode(body));
+      }
+      request = plain;
+    }
+    final streamed = await _http.send(request).timeout(timeout);
+    return http.Response.fromStream(streamed).timeout(timeout);
   }
 
   dynamic _decode(http.Response response) {
@@ -572,7 +735,7 @@ class ApiClient {
       throw ApiError.rateLimited(Duration(seconds: seconds));
     }
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      if (response.body.isEmpty) return null;
+      if (response.bodyBytes.isEmpty) return null;
       return jsonDecode(utf8.decode(response.bodyBytes));
     }
     Map<String, dynamic> json;
@@ -590,6 +753,10 @@ class ApiClient {
 
   /// تجديد رمز الوصول — محاولة واحدة متزامنة (single-flight): كل الطلبات
   /// المتزامنة التي تصطدم بـ 401 تنتظر نفس عملية التجديد بدل تكرارها.
+  ///
+  /// يعيد `null` فقط عندما **يرفض** السيرفر رمز التجديد (401/403) — تُمسح
+  /// الجلسة حينها. فشل الشبكة أو خطأ سيرفر مؤقت يُرمى `ApiError` وتبقى
+  /// الجلسة كما هي لإعادة المحاولة لاحقًا.
   Future<Session?> _refreshSession() {
     return _refreshInFlight ??= _doRefresh().whenComplete(() {
       _refreshInFlight = null;
@@ -599,22 +766,52 @@ class ApiClient {
   Future<Session?> _doRefresh() async {
     final current = _session;
     if (current == null) return null;
-    http.Response response;
-    try {
-      response = await _rawSend('POST', '/auth/refresh',
-          body: {'refreshToken': current.refreshToken});
-    } catch (_) {
-      return null;
-    }
-    if (response.statusCode < 200 || response.statusCode >= 300) {
+    final response = await _guard(() => _rawSend('POST', '/auth/refresh',
+        body: {'refreshToken': current.refreshToken}));
+    if (response.statusCode == 401 || response.statusCode == 403) {
       _session = null;
       await tokenStore.clear();
       return null;
     }
-    final json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    // 429 / 5xx: ليس رفضًا للجلسة — يُرمى خطأ قابل لإعادة المحاولة.
+    final json = _decode(response) as Map<String, dynamic>;
     final refreshed = Session.fromJson(json);
     _session = refreshed;
     await tokenStore.save(refreshed, persist: _persistSession);
     return refreshed;
   }
 }
+
+class _Upload {
+  _Upload(this.bytes, this.filename, this.contentType);
+
+  final List<int> bytes;
+  final String filename;
+  final String? contentType;
+
+  MediaType? get mediaType {
+    final type = contentType ?? _guessType(filename);
+    if (type == null) return null;
+    try {
+      return MediaType.parse(type);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String? _guessType(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    return null;
+  }
+}
+
+/// يوم الأسبوع: Dart (`DateTime.monday`=1 … `DateTime.sunday`=7) ← السيرفر
+/// (الأحد=0 … السبت=6).
+int serverWeekday(int dartWeekday) => dartWeekday % 7;
+
+/// تاريخ يوم عمل `YYYY-MM-DD` من مكوّنات [d] كما هي.
+String workDateOf(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';

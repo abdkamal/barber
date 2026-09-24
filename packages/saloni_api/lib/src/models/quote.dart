@@ -5,6 +5,7 @@ import 'json_utils.dart';
 class Quote {
   const Quote({
     required this.barberId,
+    this.barberName,
     required this.start,
     required this.end,
     required this.durationMin,
@@ -15,6 +16,9 @@ class Quote {
   });
 
   final String barberId;
+
+  /// اسم الحلاق المختار (مفيد عند «الأسرع»).
+  final String? barberName;
   final DateTime start;
   final DateTime end;
   final int durationMin;
@@ -32,10 +36,11 @@ class Quote {
 
   factory Quote.fromJson(Map<String, dynamic> json) => Quote(
         barberId: json['barberId'] as String,
+        barberName: json['barberName'] as String?,
         start: parseUtc(json['start'] as String),
         end: parseUtc(json['end'] as String),
-        durationMin: json['durationMin'] as int,
-        priceCents: json['price'] as int,
+        durationMin: (json['durationMin'] as num).toInt(),
+        priceCents: (json['price'] as num).toInt(),
         outcome: QuoteOutcome.fromWire(json['outcome'] as String),
         offerId: json['offerId'] as String?,
         offerExpiresAt: parseUtcOrNull(json['offerExpiresAt'] as String?),
@@ -43,6 +48,7 @@ class Quote {
 
   Map<String, dynamic> toJson() => {
         'barberId': barberId,
+        'barberName': barberName,
         'start': toIso(start),
         'end': toIso(end),
         'durationMin': durationMin,

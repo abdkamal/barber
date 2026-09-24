@@ -57,17 +57,30 @@ class Outbox {
   /// يحاول إرسال كل الأحداث المستحقة الآن (`nextRetryAt` فات موعده أو غير
   /// محدد)، بترتيب رقم تسلسل الجهاز. لا يُعيد المحاولة تلقائيًا هنا؛ المستدعي
   /// (`StaffSyncEngine`) يستدعيها دوريًا.
-  Future<OutboxFlushResult> flush() async {
+  ///
+  /// `force: true` يرسل كل الصندوق متجاوزًا مهلة التراجع الأُسّي (تحديث يدوي
+  /// أو عودة الاتصال).
+  Future<OutboxFlushResult> flush({bool force = false}) async {
     final all = await store.getOutbox();
     final now = _now();
-    final due = all.where((e) => e.nextRetryAt == null || !e.nextRetryAt!.isAfter(now)).toList();
+    final due = force
+        ? all
+        : all
+            .where((e) =>
+                e.nextRetryAt == null || !e.nextRetryAt!.isAfter(now))
+            .toList();
     if (due.isEmpty) {
       return OutboxFlushResult(sent: 0, remaining: all.length);
     }
 
     List<SyncEventOutcome> outcomes;
     try {
-      outcomes = await api.pushSyncEvents(due.map((e) => e.event).toList());
+      // حدّ السيرفر 200 حدث للدفعة.
+      outcomes = [];
+      for (var i = 0; i < due.length; i += 200) {
+        final chunk = due.skip(i).take(200).map((e) => e.event).toList();
+        outcomes.addAll(await api.pushSyncEvents(chunk));
+      }
     } on ApiError catch (e) {
       // فشل الإرسال بالكامل — تراجع أُسّي لكل الأحداث المستحقة.
       for (final entry in due) {

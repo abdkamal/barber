@@ -36,7 +36,7 @@ abstract final class SaloniTheme {
       colorScheme: colorScheme,
       scaffoldBackgroundColor: c.surface,
       canvasColor: c.surface,
-      fontFamily: SaloniFonts.text,
+      fontFamily: SaloniFonts.textFamily,
       textTheme: textTheme,
       dividerColor: c.line,
       splashFactory: InkRipple.splashFactory,

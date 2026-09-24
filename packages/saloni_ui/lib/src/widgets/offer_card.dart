@@ -64,7 +64,7 @@ class OfferCard extends StatelessWidget {
                   child: Text(
                     offered,
                     style: TextStyle(
-                      fontFamily: SaloniFonts.display,
+                      fontFamily: SaloniFonts.displayFamily,
                       fontSize: 36,
                       height: 44 / 36,
                       fontWeight: FontWeight.w500,

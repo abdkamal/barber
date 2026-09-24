@@ -28,7 +28,7 @@ class SyncChange {
   final DateTime occurredAt;
 
   factory SyncChange.fromJson(Map<String, dynamic> json) => SyncChange(
-        seq: json['seq'] as int,
+        seq: asIntOrNull(json['seq']) ?? 0,
         type: json['type'] as String,
         bookingId: json['bookingId'] as String?,
         data: Map<String, dynamic>.from(json['data'] as Map? ?? const {}),
@@ -44,22 +44,55 @@ class SyncChange {
       };
 }
 
-/// استجابة `GET /sync?since=` كاملة: `{changes[], seq, serverTime}`.
+/// استجابة `GET /sync?since=` كاملة: `{changes[], seq, hasMore, serverTime}`.
+/// عند `hasMore` يُعاد السحب من `seq` فورًا.
 class SyncPullResult {
   const SyncPullResult({
     required this.changes,
     required this.seq,
+    this.hasMore = false,
     required this.serverTime,
   });
 
   final List<SyncChange> changes;
   final int seq;
+  final bool hasMore;
   final DateTime serverTime;
 
   factory SyncPullResult.fromJson(Map<String, dynamic> json) =>
       SyncPullResult(
         changes: parseList(json['changes'], SyncChange.fromJson),
-        seq: json['seq'] as int,
+        seq: asIntOrNull(json['seq']) ?? 0,
+        hasMore: json['hasMore'] as bool? ?? false,
         serverTime: parseUtc(json['serverTime'] as String),
+      );
+}
+
+/// استجابة `POST /heartbeat`: `{serverTime, seq, workDate, state, reconnected}`
+/// (`workDate`/`state` فارغان خارج الدوام).
+class HeartbeatResult {
+  const HeartbeatResult({
+    required this.serverTime,
+    required this.seq,
+    this.workDate,
+    this.state,
+    this.reconnected = false,
+  });
+
+  final DateTime serverTime;
+  final int seq;
+  final String? workDate;
+
+  /// `connected` أو `absent_today`.
+  final String? state;
+  final bool reconnected;
+
+  factory HeartbeatResult.fromJson(Map<String, dynamic> json) =>
+      HeartbeatResult(
+        serverTime: parseUtc(json['serverTime'] as String),
+        seq: asIntOrNull(json['seq']) ?? 0,
+        workDate: json['workDate'] as String?,
+        state: json['state'] as String?,
+        reconnected: json['reconnected'] as bool? ?? false,
       );
 }

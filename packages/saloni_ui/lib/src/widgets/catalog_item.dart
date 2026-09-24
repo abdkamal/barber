@@ -81,7 +81,7 @@ class CatalogItem extends StatelessWidget {
                         child: Text(
                           name,
                           style: TextStyle(
-                            fontFamily: SaloniFonts.display,
+                            fontFamily: SaloniFonts.displayFamily,
                             fontSize: 16,
                             height: 24 / 16,
                             fontWeight: FontWeight.w600,
@@ -94,7 +94,7 @@ class CatalogItem extends StatelessWidget {
                         child: Text(
                           '$price ',
                           style: TextStyle(
-                            fontFamily: SaloniFonts.display,
+                            fontFamily: SaloniFonts.displayFamily,
                             fontWeight: FontWeight.w500,
                             color: c.ink,
                           ),
@@ -103,7 +103,7 @@ class CatalogItem extends StatelessWidget {
                       Text(
                         currency,
                         style: TextStyle(
-                          fontFamily: SaloniFonts.display,
+                          fontFamily: SaloniFonts.displayFamily,
                           fontWeight: FontWeight.w500,
                           color: c.ink,
                         ),

@@ -110,6 +110,10 @@ class DriftLocalStore implements LocalStore {
       _putRaw(_kLastServerTime, time.toUtc().toIso8601String());
 
   @override
+  Future<int> currentDeviceSeq() async =>
+      await _getRaw<int>(_kDeviceSeq, (raw) => raw as int) ?? 0;
+
+  @override
   Future<int> nextDeviceSeq() async {
     return _db.transaction(() async {
       final current =

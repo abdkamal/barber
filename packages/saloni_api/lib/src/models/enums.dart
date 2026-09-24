@@ -9,7 +9,10 @@ enum BookingStatus {
   inService,
   done,
   cancelled,
-  noShow;
+  noShow,
+
+  /// عرض انتهت مدته أو رُفض (ق13) — لا يظهر في القوائم عادةً.
+  expired;
 
   static BookingStatus fromWire(String value) => switch (value) {
         'offered' => BookingStatus.offered,
@@ -19,6 +22,7 @@ enum BookingStatus {
         'done' => BookingStatus.done,
         'cancelled' => BookingStatus.cancelled,
         'no_show' => BookingStatus.noShow,
+        'expired' => BookingStatus.expired,
         _ => throw FormatException('Unknown BookingStatus: $value'),
       };
 
@@ -30,6 +34,7 @@ enum BookingStatus {
         BookingStatus.done => 'done',
         BookingStatus.cancelled => 'cancelled',
         BookingStatus.noShow => 'no_show',
+        BookingStatus.expired => 'expired',
       };
 }
 
@@ -188,16 +193,21 @@ enum DeviceEventType {
       };
 }
 
-/// نوع الاستراحة كما في حمولة `break_started`/`break_ended`.
+/// نوع الاستراحة كما في حمولة `break_started`/`break_ended` وفي
+/// `/manager/breaks` (`type`). `walkInOnly` («حاضرون فقط»، ق33) فترة يديرها
+/// المدير فقط: لا تُبدأ من جهاز الحلاق، و`GET /staff/today` يرسلها منفصلة في
+/// `walkInOnly`.
 enum BreakKind {
   rest,
   prayer,
-  emergency;
+  emergency,
+  walkInOnly;
 
   static BreakKind fromWire(String value) => switch (value) {
         'rest' => BreakKind.rest,
         'prayer' => BreakKind.prayer,
         'emergency' => BreakKind.emergency,
+        'walk_in_only' => BreakKind.walkInOnly,
         _ => throw FormatException('Unknown BreakKind: $value'),
       };
 
@@ -205,7 +215,11 @@ enum BreakKind {
         BreakKind.rest => 'rest',
         BreakKind.prayer => 'prayer',
         BreakKind.emergency => 'emergency',
+        BreakKind.walkInOnly => 'walk_in_only',
       };
+
+  /// هل يمكن للحلاق بدؤها من جهازه (حدث `break_started`)؟
+  bool get deviceStartable => this != BreakKind.walkInOnly;
 }
 
 /// قرار الحلاق عند تجاوز الإغلاق — حمولة `closing_decision` (ق24).

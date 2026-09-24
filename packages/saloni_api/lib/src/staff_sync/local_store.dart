@@ -56,8 +56,11 @@ abstract class LocalStore {
   Future<DateTime?> getLastServerTime();
   Future<void> saveLastServerTime(DateTime time);
 
-  /// رقم تسلسل الجهاز التالي (متزايد دائمًا، حتى عبر إعادة التشغيل).
+  /// رقم تسلسل الجهاز التالي (متزايد دائمًا، حتى عبر إعادة التشغيل) — يستهلكه.
   Future<int> nextDeviceSeq();
+
+  /// آخر رقم تسلسل استُخدم (دون استهلاك رقم جديد) — يُرسل مع النبضة.
+  Future<int> currentDeviceSeq();
 
   Future<List<OutboxEntry>> getOutbox();
   Future<void> putOutboxEntry(OutboxEntry entry);
@@ -119,6 +122,9 @@ class InMemoryLocalStore implements LocalStore {
 
   @override
   Future<int> nextDeviceSeq() async => ++_deviceSeq;
+
+  @override
+  Future<int> currentDeviceSeq() async => _deviceSeq;
 
   @override
   Future<List<OutboxEntry>> getOutbox() async {
