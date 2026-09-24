@@ -23,6 +23,8 @@ const UpdateSettings = z
     offerHoldMinutes: z.number().int().min(1).max(60),
     barberNotConnectedAlertMinutes: minutes(240),
     overrunAlertPercent: z.number().int().min(50).max(500),
+    // Round 2 (item 1): how long after its shift end a past day may stay operational (ق24).
+    dayCloseGraceMinutes: z.number().int().min(60).max(720),
   })
   .partial()
   .strict();

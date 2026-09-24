@@ -26,5 +26,7 @@ export const QErrors = {
   barberNotWorking: () => new ApiError(HttpStatus.CONFLICT, 'BARBER_NOT_WORKING', 'الحلاق المختار ليس في دوامه اليوم'),
   transferNoSlot: (details: unknown) =>
     new ApiError(HttpStatus.CONFLICT, 'TRANSFER_NO_SLOT', 'لا يتسع وقت هذا الحلاق اليوم لهذا الحجز دون تأخير أحد', undefined, details),
+  notUnfinished: () => new ApiError(HttpStatus.CONFLICT, 'BOOKING_NOT_UNFINISHED', 'هذا الحجز ليس خدمة معلّقة من يوم مُغلق'),
+  invalidEndTime: () => new ApiError(HttpStatus.BAD_REQUEST, 'INVALID_END_TIME', 'وقت الانتهاء يجب أن يكون بعد بدء الخدمة وألا يتجاوز الآن'),
   invalidPhone: () => new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', 'رقم الهاتف غير صحيح'),
 };

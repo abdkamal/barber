@@ -221,6 +221,13 @@ export class AuthService {
   /**
    * Rotating refresh tokens. The salon comes from the signed refresh token (never from the body).
    * Presenting an already-rotated token revokes the whole session (family) — reuse detection.
+   *
+   * Round 2 (item 7) — flaky networks: when the answer to a rotation is lost the app retries with
+   * the same token. Within `refreshReuseGraceSec` (30 s) of its rotation, the DIRECTLY preceding
+   * token of the session (its successor still unused) is honoured ONCE: a fresh pair is issued
+   * (audited `session.refresh_grace_reuse`) and the successor and the re-issue become siblings —
+   * rotating either retires the other. Any other reuse (after the window, twice, or an older
+   * token) still revokes the family.
    */
   async refresh(refreshToken: string, ip: string): Promise<SessionResponse> {
     const claims = this.tokens.verifyRefresh(refreshToken);
@@ -231,11 +238,35 @@ export class AuthService {
 
     type Outcome = { ok: SessionResponse } | { error: 'invalid' | 'reused' };
     const outcome: Outcome = await t.db.tx(async (q): Promise<Outcome> => {
-      const row = await SessionsRepo.lockRefreshToken(q, claims.jti);
+      const graceSec = this.config.auth.refreshReuseGraceSec;
+      const row = await SessionsRepo.lockRefreshToken(q, claims.jti, graceSec);
       if (!row || row.token_hash !== sha256Hex(refreshToken) || row.session_id !== claims.sess || row.subject_id !== claims.sub) {
         return { error: 'invalid' };
       }
       if (row.session_revoked_at) return { error: 'invalid' };
+      if (
+        graceSec > 0 &&
+        row.used_at && row.used_within_grace && !row.revoked_at && !row.grace_used_at && !row.expired && row.replaced_by &&
+        (await SessionsRepo.lockLiveToken(q, row.replaced_by, row.session_id))
+      ) {
+        const subject = await this.loadSubject(q, row.subject_kind, row.subject_id);
+        if (subject && subject.tokenVersion === claims.tv && subject.role === claims.role) {
+          const jti = randomUUID();
+          const base = { sid: t.salonId, sub: subject.id, role: subject.role, tv: subject.tokenVersion, sess: row.session_id };
+          const next = this.tokens.signRefresh({ ...base, jti });
+          await SessionsRepo.addRefreshToken(q, { id: jti, sessionId: row.session_id, tokenHash: sha256Hex(next.token), expiresAt: next.expiresAt, siblingId: row.replaced_by });
+          await SessionsRepo.markGraceReissue(q, row.id, row.replaced_by, jti);
+          await writeAudit(q, {
+            actorKind: 'system',
+            action: 'session.refresh_grace_reuse',
+            targetKind: row.subject_kind,
+            targetId: row.subject_id,
+            ip,
+            details: { sessionId: row.session_id, tokenId: row.id, successorId: row.replaced_by, reissuedId: jti },
+          });
+          return { ok: this.sessionResponse(t, subject, this.tokens.signAccess(base), next.token) };
+        }
+      }
       if (row.used_at || row.revoked_at) {
         await SessionsRepo.revokeSession(q, row.session_id, 'refresh_token_reuse');
         await writeAudit(q, {

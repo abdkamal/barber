@@ -429,9 +429,9 @@ describe('review fixes — login throttling (M1)', () => {
     const login = (phone: string, ip: string, password = 'wrong-password') =>
       ctx.http().post('/v1/auth/customer/login').set('X-Forwarded-For', ip).send({ salonCode: ` ${s.code.toLowerCase()} `, phone, password });
     const codes: number[] = [];
-    for (let i = 0; i < 11; i++) codes.push((await login(spellings[i % spellings.length]!, `10.9.${i}.1`)).status);
+    for (let i = 0; i < 11; i++) codes.push((await login(spellings[i % spellings.length]!, '10.9.0.1')).status);
     expect(codes.slice(0, 10).every((c) => c === 401)).toBe(true);
-    expect(codes[10]).toBe(429); // the per-account budget (10 / 15 min) is shared by every spelling
+    expect(codes[10]).toBe(429); // the per-account+IP budget (10 / 15 min) is shared by every spelling
 
     // Account-wide delay: failures from many IPs slow the answer down but the right password still works.
     const phone2 = randomPhone();
@@ -442,6 +442,30 @@ describe('review fixes — login throttling (M1)', () => {
     expect(ok.status).toBe(200);
     expect(Date.now() - t0).toBeGreaterThanOrEqual(380);
   });
+
+  it('M1 (round 2): an attacker hammering an account from many IPs never locks the real user out', async () => {
+    const s = await setupQueueSalon(ctx);
+    const phone = randomPhone();
+    await registerCustomer(ctx, s.code, phone);
+    const login = (ip: string, password = 'wrong-password') =>
+      ctx.http().post('/v1/auth/customer/login').set('X-Forwarded-For', ip).send({ salonCode: s.code, phone, password });
+    // 25 guesses from 13 addresses — well past the old per-account budget (10 / 15 min → 429 for everyone).
+    const codes: number[] = [];
+    for (let i = 0; i < 25; i++) codes.push((await login(`10.5.${i % 13}.9`)).status);
+    expect(codes.every((c) => c === 401)).toBe(true); // slowed down, never refused
+    // The real user on his own phone (a fresh address) signs in with the right password —
+    // slowed down by at most a few seconds, never refused.
+    const t0 = Date.now();
+    const ok = await login('10.4.0.1', 'cust-pass1');
+    expect(ok.status).toBe(200);
+    expect(Date.now() - t0).toBeLessThan(5_000);
+    // Staff too: a barber is never locked out of his own account from another address.
+    const b = s.barbers[0]!;
+    const staff = (ip: string, password: string) =>
+      ctx.http().post('/v1/auth/staff/login').set('X-Forwarded-For', ip).send({ salonCode: s.code, username: b.username, password });
+    for (let i = 0; i < 12; i++) expect((await staff(`10.3.${i}.9`, 'wrong-password')).status).toBe(401);
+    expect((await staff('10.2.0.1', 'staff-password-1')).status).toBe(200);
+  }, 120_000);
 
   it('M4: device sync pushes have a per-account budget', async () => {
     const s = await setupQueueSalon(ctx);

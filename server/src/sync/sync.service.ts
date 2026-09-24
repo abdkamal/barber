@@ -34,7 +34,9 @@ import {
   exemptionReference,
   insertBookingEvent,
   loadDay,
+  lockDayRow,
   operationalShift,
+  dayWindow,
   project,
   releaseExpiredOffers,
   resolveShift,
@@ -43,10 +45,11 @@ import {
   toEntry,
   updateReference,
 } from '../scheduling/day';
-import { closeStaleOpenBreaks } from '../scheduling/day-close';
+import { closeStaleOpenBreaks, resolveUnfinishedConflict } from '../scheduling/day-close';
 import { PostCommit } from '../scheduling/post-commit';
 import type { ReasonCode } from '../scheduling/reasons';
 import { type BookingRow, currentSeq } from '../scheduling/rows';
+import type { Shift } from '../scheduling/time';
 
 export interface DeviceEventIn {
   id: string;
@@ -358,13 +361,20 @@ export class SyncService {
     return ctx;
   }
 
-  private async lockToday(q: TenantQueryable, c: EvCtx, effects: Effects): Promise<DayCtx> {
+  /**
+   * Locks the barber's current day. `beforeEmit` runs right after the day lock and before anything
+   * is emitted (expired offers are released after it) — the place to lock `breaks` rows, so the
+   * lock order is always barber-day row → breaks rows → change_counter (round 2, item 3).
+   */
+  private async lockToday(q: TenantQueryable, c: EvCtx, effects: Effects, beforeEmit?: (shift: Shift) => Promise<void>): Promise<DayCtx> {
     const settings = await SettingsRepo.get(q);
     const lookahead = settings.booking_opens_before_minutes * MINUTE;
     const shift =
       (await resolveShift(q, c.t.salon.timezone, c.me.subjectId, c.at, lookahead)) ??
-      (await operationalShift(q, c.t.salon.timezone, c.me.subjectId, c.now, lookahead));
+      (await operationalShift(q, c.t.salon.timezone, c.me.subjectId, c.now, dayWindow(settings)));
     if (!shift) throw new Reject('NOT_WORKING');
+    await lockDayRow(q, c.me.subjectId, shift.workDate);
+    if (beforeEmit) await beforeEmit(shift);
     const ctx = await loadDay(q, c.t.salon, c.me.subjectId, shift, c.now, { lock: true, settings });
     await releaseExpiredOffers(q, ctx, effects);
     return ctx;
@@ -496,7 +506,10 @@ export class SyncService {
       "SELECT 1 FROM booking_events WHERE booking_id = $1 AND type = 'service_started' AND approximate_time LIMIT 1",
       [row.id],
     );
-    const measured = measuredDuration(start, end, { approximate: c.approximate || approxStart.length > 0 });
+    // Round 2 (item 4): a service left unfinished when its day was closed is finished late — its
+    // duration says nothing about the service, so it is never learned from.
+    const afterClose = row.day_closed_at !== null;
+    const measured = afterClose ? null : measuredDuration(start, end, { approximate: c.approximate || approxStart.length > 0 });
     await q.query(
       `INSERT INTO duration_samples (staff_id, service_set_key, customer_id, booking_id, duration_seconds, excluded, exclusion_reason)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -507,9 +520,18 @@ export class SyncService {
         row.id,
         Math.max(0, Math.round((end - start) / 1000)),
         measured === null,
-        measured === null ? (c.clamped ? 'clamped_time' : c.approximate || approxStart.length ? 'approximate_time' : 'invalid_times') : null,
+        measured === null
+          ? afterClose
+            ? 'after_day_close'
+            : c.clamped
+              ? 'clamped_time'
+              : c.approximate || approxStart.length
+                ? 'approximate_time'
+                : 'invalid_times'
+          : null,
       ],
     );
+    if (afterClose) await resolveUnfinishedConflict(q, row.id, c.me.subjectId);
     if (measured !== null) await this.checkBaseDuration(q, effects, ctx, row);
     const { rows: svc } = await q.query<{ total: string }>('SELECT COALESCE(sum(price_minor), 0) AS total FROM booking_services WHERE booking_id = $1', [row.id]);
     await q.query('INSERT INTO payments (booking_id, amount_minor) VALUES ($1, $2) ON CONFLICT (booking_id) DO NOTHING', [row.id, Number(svc[0]!.total)]);
@@ -693,9 +715,9 @@ export class SyncService {
 
   private async breakStarted(q: TenantQueryable, effects: Effects, c: EvCtx): Promise<Applied> {
     const { kind, durationMin } = BreakPayload.parse(c.ev.payload ?? {});
-    const ctx = await this.lockToday(q, c, effects);
-    // An open break left over from an earlier day must not block today's (review, minor).
-    await closeStaleOpenBreaks(q, c.t.salon.timezone, c.me.subjectId, c.now, effects, ctx.shift.workDate);
+    // An open break left over from an earlier day must not block today's (review, minor) — closed
+    // under the day lock and before any change is emitted (lock order, round 2).
+    const ctx = await this.lockToday(q, c, effects, (shift) => closeStaleOpenBreaks(q, c.t.salon.timezone, c.me.subjectId, c.now, effects, shift.workDate));
     const { rows: open } = await q.query('SELECT 1 FROM breaks WHERE staff_id = $1 AND open', [c.me.subjectId]);
     if (open.length) throw new Reject('BREAK_ALREADY_OPEN');
     const before = project(ctx);
@@ -712,8 +734,10 @@ export class SyncService {
   }
 
   private async breakEnded(q: TenantQueryable, effects: Effects, c: EvCtx): Promise<Applied> {
-    const ctx = await this.lockToday(q, c, effects);
-    const { rows } = await q.query<{ id: string; starts_at: Date }>('SELECT id, starts_at FROM breaks WHERE staff_id = $1 AND open FOR UPDATE', [c.me.subjectId]);
+    let rows: Array<{ id: string; starts_at: Date }> = [];
+    const ctx = await this.lockToday(q, c, effects, async () => {
+      rows = (await q.query<{ id: string; starts_at: Date }>('SELECT id, starts_at FROM breaks WHERE staff_id = $1 AND open FOR UPDATE', [c.me.subjectId])).rows;
+    });
     const b = rows[0];
     if (!b) throw new Reject('NO_OPEN_BREAK');
     const before = project(ctx);

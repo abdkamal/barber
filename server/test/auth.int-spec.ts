@@ -4,6 +4,7 @@ import {
 } from './helpers';
 
 const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+const jtiOf = (token: string): string => JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString()).jti;
 
 describe('authentication & sessions', () => {
   let ctx: TestContext;
@@ -14,6 +15,10 @@ describe('authentication & sessions', () => {
     S = await createSalon(ctx, 'Raha Salon');
   });
   afterAll(() => ctx.close());
+
+  /** Pretends the token was rotated `sec` seconds ago (outside the refresh grace window). */
+  const ageRotation = (token: string, sec: number) =>
+    salonQuery(ctx, S.dbName, `UPDATE refresh_tokens SET used_at = now() - make_interval(secs => $2) WHERE id = $1`, [jtiOf(token), sec]);
 
   describe('staff login', () => {
     it('logs in with salon code + username + password and returns the contract session shape', async () => {
@@ -140,7 +145,8 @@ describe('authentication & sessions', () => {
       expect(r2).not.toBe(r1);
       expect((await ctx.http().get('/v1/auth/session').set(auth(rot.body.accessToken))).status).toBe(200);
 
-      // Replay of the rotated token → reuse detected.
+      // Replay of the rotated token (after the 30 s grace for lost answers) → reuse detected.
+      await ageRotation(r1, 31);
       const reuse = await ctx.http().post('/v1/auth/refresh').send({ refreshToken: r1 });
       expect(reuse.status).toBe(401);
       expect(reuse.body.error.code).toBe('REFRESH_TOKEN_REUSED');
@@ -151,6 +157,63 @@ describe('authentication & sessions', () => {
       expect(audit.length).toBeGreaterThan(0);
       // Other sessions of the same account are unaffected.
       expect((await ctx.http().get('/v1/auth/session').set(auth(S.manager.accessToken))).status).toBe(200);
+    });
+
+    // ─── Round 2 (item 7): grace for a lost rotation answer on a flaky network ─────────
+    const refresh = (refreshToken: string) => ctx.http().post('/v1/auth/refresh').send({ refreshToken });
+
+    it('grace: the directly preceding token re-presented within 30 s gets a fresh pair — once, audited', async () => {
+      const r1 = (await staffLogin(ctx, S.code, S.manager.username)).body.refreshToken;
+      const rot = await refresh(r1);
+      expect(rot.status).toBe(200); // the answer "was lost" — the app retries with r1
+      const retry = await refresh(r1);
+      expect(retry.status).toBe(200);
+      const r3 = retry.body.refreshToken;
+      expect(r3).not.toBe(rot.body.refreshToken);
+      expect((await ctx.http().get('/v1/auth/session').set(auth(retry.body.accessToken))).status).toBe(200);
+      const audit = await salonQuery(ctx, S.dbName, "SELECT details FROM audit_log WHERE action = 'session.refresh_grace_reuse' AND details->>'tokenId' = $1", [jtiOf(r1)]);
+      expect(audit).toHaveLength(1);
+      // The session goes on from the token the app kept (r3); the parallel successor is retired.
+      const next = await refresh(r3);
+      expect(next.status).toBe(200);
+      expect((await refresh(next.body.refreshToken)).status).toBe(200);
+    });
+
+    it('grace is single-use: a second replay of the same token still revokes the family', async () => {
+      const r1 = (await staffLogin(ctx, S.code, S.manager.username)).body.refreshToken;
+      const r2 = (await refresh(r1)).body.refreshToken;
+      const r3 = (await refresh(r1)).body.refreshToken; // grace
+      const again = await refresh(r1);
+      expect(again.status).toBe(401);
+      expect(again.body.error.code).toBe('REFRESH_TOKEN_REUSED');
+      expect((await refresh(r2)).status).toBe(401);
+      expect((await refresh(r3)).status).toBe(401);
+    });
+
+    it('no grace after the window, nor for an older token, nor for a retired sibling', async () => {
+      // After the window.
+      const a1 = (await staffLogin(ctx, S.code, S.manager.username)).body.refreshToken;
+      const a2 = (await refresh(a1)).body.refreshToken;
+      await ageRotation(a1, 31);
+      expect((await refresh(a1)).body.error.code).toBe('REFRESH_TOKEN_REUSED');
+      expect((await refresh(a2)).status).toBe(401);
+
+      // An older token (not the directly preceding one), even within the window.
+      const b1 = (await staffLogin(ctx, S.code, S.manager.username)).body.refreshToken;
+      const b2 = (await refresh(b1)).body.refreshToken;
+      const b3 = (await refresh(b2)).body.refreshToken;
+      expect((await refresh(b1)).body.error.code).toBe('REFRESH_TOKEN_REUSED');
+      expect((await refresh(b3)).status).toBe(401);
+
+      // The sibling retired when the other branch was rotated: presenting it is reuse.
+      const c1 = (await staffLogin(ctx, S.code, S.manager.username)).body.refreshToken;
+      const c2 = (await refresh(c1)).body.refreshToken;
+      const c3 = (await refresh(c1)).body.refreshToken; // grace re-issue, sibling of c2
+      const c4 = (await refresh(c3)).body.refreshToken; // c2 retired
+      const stale = await refresh(c2);
+      expect(stale.status).toBe(401);
+      expect(stale.body.error.code).toBe('REFRESH_TOKEN_REUSED');
+      expect((await refresh(c4)).status).toBe(401);
     });
 
     it('stores only hashes of refresh tokens', async () => {
@@ -269,18 +332,21 @@ describe('rate limiting', () => {
     S = await createSalon(ctx, 'Limit Salon');
     await ctx.close();
     const limited = testConfig({ RATE_LIMITS_ENABLED: 'true' });
-    limited.rateLimits.login = { ip: { limit: 3, windowMs: 60_000 }, account: { limit: 2, windowMs: 60_000 } };
+    limited.rateLimits.login = { ip: { limit: 3, windowMs: 60_000 }, accountIp: { limit: 2, windowMs: 60_000 }, account: { limit: 2, windowMs: 60_000 } };
+    limited.backoff = { ...limited.backoff, accountBaseMs: 50, accountMaxDelayMs: 100 };
     limited.rateLimits.salonRegister = { ip: { limit: 1, windowMs: 60_000 } };
     ctx = await startApp(limited);
   });
   afterAll(() => ctx.close());
 
-  it('limits login per account across IPs and per IP across accounts', async () => {
+  it('limits login per account+IP and per IP across accounts; across IPs an account is only slowed (M1)', async () => {
     const tryLogin = (user: string, ip: string) =>
       ctx.http().post('/v1/auth/staff/login').set('X-Forwarded-For', ip).send({ salonCode: S.code, username: user, password: 'x' });
+    // Other addresses never get the account refused (delay-only beyond the account budget).
+    for (const ip of ['10.1.1.1', '10.1.1.2', '10.1.1.3', '10.1.1.4']) expect((await tryLogin('victim', ip)).status).toBe(401);
     expect((await tryLogin('victim', '10.1.0.1')).status).toBe(401);
-    expect((await tryLogin('victim', '10.1.0.2')).status).toBe(401);
-    const acct = await tryLogin('victim', '10.1.0.3');
+    expect((await tryLogin('victim', '10.1.0.1')).status).toBe(401);
+    const acct = await tryLogin('victim', '10.1.0.1');
     expect(acct.status).toBe(429);
     expect(acct.body.error.code).toBe('RATE_LIMITED');
     expect(Number(acct.headers['retry-after'])).toBeGreaterThan(0);

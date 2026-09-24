@@ -11,6 +11,7 @@ export interface SettingsRow {
   offer_hold_minutes: number;
   barber_not_connected_alert_minutes: number;
   overrun_alert_percent: number;
+  day_close_grace_minutes: number;
   updated_at: Date;
 }
 
@@ -26,6 +27,7 @@ export const SETTINGS_FIELDS = {
   offerHoldMinutes: 'offer_hold_minutes',
   barberNotConnectedAlertMinutes: 'barber_not_connected_alert_minutes',
   overrunAlertPercent: 'overrun_alert_percent',
+  dayCloseGraceMinutes: 'day_close_grace_minutes',
 } as const;
 
 export type SettingsDto = { [K in keyof typeof SETTINGS_FIELDS]: SettingsRow[(typeof SETTINGS_FIELDS)[K]] };

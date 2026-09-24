@@ -12,12 +12,14 @@ import { nextCall, recordCall } from '../scheduling/calling';
 import { Clock } from '../scheduling/clock';
 import {
   commitQueue,
+  dayWindow,
   dbStateOf,
   type Effects,
   emitChange,
   HEARTBEAT_TIMEOUT_MS,
   insertBookingEvent,
   loadDay,
+  lockDayRow,
   operationalShift,
   project,
   releaseExpiredOffers,
@@ -25,7 +27,7 @@ import {
   updateReference,
   workingStaff,
 } from '../scheduling/day';
-import { closeStaleDays, closeStaleOpenBreaks } from '../scheduling/day-close';
+import { closeStaleDays, closeStaleOpenBreaks, closeStaleOpenBreaksUnlocked } from '../scheduling/day-close';
 import { PostCommit } from '../scheduling/post-commit';
 import { reasonText, type ReasonCode } from '../scheduling/reasons';
 import type { StaffInfo } from '../scheduling/rows';
@@ -140,14 +142,17 @@ export class SchedulerService implements OnApplicationBootstrap, OnApplicationSh
     const now = this.clock.now();
     const settings = await SettingsRepo.get(t.db);
     let next = now + QUIET_MS;
-    const lookahead = settings.booking_opens_before_minutes * MINUTE;
-    // C1: days that are over (the next business day began) are closed out first.
-    await closeStaleDays(t, this.post, this.notifications, now, lookahead);
+    const win = dayWindow(settings);
+    // C1: days that are over (the next business day began, or the grace after closing ran out) are closed out first.
+    await closeStaleDays(t, this.post, this.notifications, now, win);
     for (const s of await workingStaff(t.db)) {
       // C1: the operational day — the running shift, or an ended one still serving (ق24) customers.
-      const shift = await operationalShift(t.db, t.salon.timezone, s.id, now, lookahead, s.schedules);
-      await this.post.tx(t, (q, effects) => closeStaleOpenBreaks(q, t.salon.timezone, s.id, now, effects));
-      if (!shift) continue;
+      const shift = await operationalShift(t.db, t.salon.timezone, s.id, now, win, s.schedules);
+      if (!shift) {
+        // Lock order (round 2): the open breaks' day rows first, then the breaks, then changes.
+        await this.post.tx(t, (q, effects) => closeStaleOpenBreaksUnlocked(q, t.salon.timezone, s.id, now, effects));
+        continue;
+      }
       next = Math.min(next, await this.post.tx(t, (q, effects) => this.runBarber(q, effects, t, s, shift, settings, now)));
     }
     const pending = await t.db.query("SELECT 1 FROM notifications WHERE status = 'pending' LIMIT 1");
@@ -167,6 +172,9 @@ export class SchedulerService implements OnApplicationBootstrap, OnApplicationSh
     settings: SettingsRow,
     now: number,
   ): Promise<number> {
+    // Lock order (round 2): the barber's day row first, then his open breaks, then any change emit.
+    await lockDayRow(q, staff.id, shift.workDate);
+    await closeStaleOpenBreaks(q, t.salon.timezone, staff.id, now, effects);
     const ctx = await loadDay(q, t.salon, staff.id, shift, now, { lock: true, settings, staff });
     await releaseExpiredOffers(q, ctx, effects);
     let due = now + MAX_IDLE_MS;

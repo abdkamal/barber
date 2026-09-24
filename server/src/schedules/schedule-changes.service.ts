@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { MINUTE, type ProjectedSlot } from '@saloni/engine';
+import { type ProjectedSlot } from '@saloni/engine';
 import { SettingsRepo } from '../settings/settings.repository';
 import type { TenantContext, TenantQueryable } from '../tenancy/tenant-context';
 import { Clock } from '../scheduling/clock';
@@ -12,6 +12,7 @@ import {
   loadDay,
   lockDays,
   operationalShift,
+  dayWindow,
   project,
   stateOf,
   stateWire,
@@ -47,7 +48,7 @@ export class ScheduleChangesService {
     const settings = await SettingsRepo.get(q);
     const out: AffectedDay[] = [];
     for (const id of staffIds) {
-      const shift = await operationalShift(q, t.salon.timezone, id, this.clock.now(), settings.booking_opens_before_minutes * MINUTE);
+      const shift = await operationalShift(q, t.salon.timezone, id, this.clock.now(), dayWindow(settings));
       if (shift) out.push({ staffId: id, shift });
     }
     return out;

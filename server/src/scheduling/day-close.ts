@@ -2,13 +2,14 @@ import { remove } from '@saloni/engine';
 import { NotificationService } from '../notifications/notification.service';
 import { Texts } from '../notifications/texts';
 import type { TenantContext, TenantQueryable } from '../tenancy/tenant-context';
+import { BOOKING_SELECT, type BookingRow } from './rows';
 import { emitBooking } from './booking-writer';
-import { commitQueue, type Effects, emitChange, insertBookingEvent, isStaleDay, loadDay, schedulesOf, shiftOrDay } from './day';
+import { commitQueue, type DayWindow, type Effects, emitChange, insertBookingEvent, isStaleDay, loadDay, lockDayRow, schedulesOf, shiftOrDay } from './day';
 import { PostCommit } from './post-commit';
 
 /**
- * Review C1: active bookings of a business day that is over — the barber's next day has begun —
- * are closed out so they never show as current again. Waiting/called → cancelled (`day_closed`,
+ * Review C1: active bookings of a business day that is over — the barber's next day has begun, or
+ * (round 2) the grace after its shift end (`day_close_grace_minutes`) ran out — are closed out so they never show as current again. Waiting/called → cancelled (`day_closed`,
  * customer told); in service → kept for the barber to finish, flagged for the manager's review.
  * Offers of that day expire. Returns the number of days closed.
  */
@@ -17,7 +18,7 @@ export async function closeStaleDays(
   post: PostCommit,
   notifications: NotificationService,
   now: number,
-  lookaheadMs: number,
+  win: DayWindow,
 ): Promise<number> {
   const { rows: groups } = await t.db.query<{ staff_id: string; work_date: string }>(
     `SELECT DISTINCT staff_id, work_date::text AS work_date FROM bookings
@@ -29,7 +30,7 @@ export async function closeStaleDays(
   let closed = 0;
   for (const g of groups) {
     const schedules = await schedulesOf(t.db, g.staff_id);
-    if (!isStaleDay(schedules, t.salon.timezone, g.work_date, now, lookaheadMs)) continue;
+    if (!isStaleDay(schedules, t.salon.timezone, g.work_date, now, win)) continue;
     await post.tx(t, (q, effects) => closeDay(q, effects, t, notifications, g.staff_id, shiftOrDay(schedules, t.salon.timezone, g.work_date), now));
     closed++;
   }
@@ -88,6 +89,11 @@ async function closeDay(
  * Open device breaks (started on the barber's phone, never ended) are closed once their business
  * day is over — shift ended and nothing left to serve — so they neither stretch forever nor block
  * the next day's breaks (review, minor).
+ *
+ * Lock order (round 2): the caller MUST already hold the barber's day lock (lockDayRow / loadDay
+ * with `lock`) and must not have emitted any change yet in this transaction — this locks the
+ * barber's open `breaks` rows and then emits (change_counter). Every path therefore takes
+ * barber-day row → breaks rows → change_counter, never the reverse.
  */
 export async function closeStaleOpenBreaks(q: TenantQueryable, tz: string, staffId: string, now: number, effects: Effects, keepWorkDate?: string): Promise<void> {
   const { rows } = await q.query<{ id: string; work_date: string; starts_at: Date }>(
@@ -109,4 +115,43 @@ export async function closeStaleOpenBreaks(q: TenantQueryable, tz: string, staff
     await q.query('UPDATE breaks SET open = false, ends_at = $2 WHERE id = $1', [b.id, new Date(end)]);
     await emitChange(q, effects, { staffId, type: 'break_ended', entity: 'break', data: { breakId: b.id, end: new Date(end).toISOString(), automatic: true } });
   }
+}
+
+/**
+ * For a barber with no operational day (the scheduler): locks the day rows of his open breaks
+ * (oldest first) and only then closes the stale ones — same lock order as every other path.
+ */
+export async function closeStaleOpenBreaksUnlocked(q: TenantQueryable, tz: string, staffId: string, now: number, effects: Effects): Promise<void> {
+  const { rows } = await q.query<{ work_date: string }>(
+    'SELECT DISTINCT work_date::text AS work_date FROM breaks WHERE staff_id = $1 AND open ORDER BY 1',
+    [staffId],
+  );
+  if (!rows.length) return;
+  for (const r of rows) await lockDayRow(q, staffId, r.work_date);
+  await closeStaleOpenBreaks(q, tz, staffId, now, effects);
+}
+
+/**
+ * Round 2 (item 4): services still `in_service` when their business day was closed out
+ * (`needs_review`, conflict `unfinished_at_day_close`). The barber sees them in GET /staff/today
+ * (`unfinishedFromPreviousDay`) and may finish them (sync `service_finished`, then payment); the
+ * manager sees them in GET /manager/queues and pendingItems and may resolve them.
+ */
+export async function unfinishedFromClosedDays(q: TenantQueryable, staffId?: string): Promise<BookingRow[]> {
+  const { rows } = await q.query<BookingRow>(
+    `${BOOKING_SELECT}
+      WHERE b.status = 'in_service' AND b.day_closed_at IS NOT NULL AND ($1::uuid IS NULL OR b.staff_id = $1)
+      ORDER BY b.work_date, b.actual_start NULLS LAST, b.id`,
+    [staffId ?? null],
+  );
+  return rows;
+}
+
+/** Marks the booking's `unfinished_at_day_close` conflict resolved (finished or cancelled). */
+export async function resolveUnfinishedConflict(q: TenantQueryable, bookingId: string, byStaffId: string): Promise<void> {
+  await q.query(
+    `UPDATE sync_conflicts SET resolved_at = now(), resolved_by_staff_id = $2
+      WHERE booking_id = $1 AND kind = 'unfinished_at_day_close' AND resolved_at IS NULL`,
+    [bookingId, byStaffId],
+  );
 }

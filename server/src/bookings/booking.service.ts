@@ -27,6 +27,7 @@ import {
   estimateFor,
   insertBookingEvent,
   isStaleDay,
+  dayWindow,
   loadDay,
   lockDays,
   project,
@@ -417,7 +418,7 @@ export class BookingService {
     await this.assertBelowMax(q, me.subjectId, settings, now);
     const slots = await commitQueue(q, ctx, confirmOffer(ctx.queue, offerId), { reason: 'booked', primary: [offerId], effects, actorKind: 'customer', actorId: me.subjectId });
     const slot = slots.find((s) => s.bookingId === offerId)!;
-    await q.query('UPDATE bookings SET original_expected_start = $2, last_shown_expected_start = $2, offer_expires_at = NULL WHERE id = $1', [offerId, new Date(slot.start)]);
+    await q.query('UPDATE bookings SET original_expected_start = $2, last_shown_expected_start = $2, told_expected_start = $2, offer_expires_at = NULL WHERE id = $1', [offerId, new Date(slot.start)]);
     await insertBookingEvent(q, { bookingId: offerId, type: 'created', payload: { start: iso(slot.start), fromOffer: true }, occurredAt: now, actorKind: 'customer', actorId: me.subjectId, reason: 'booked' });
     await emitBooking(q, ctx, offerId, 'booking_created', effects, slot);
     await this.notifications.toCustomer(q, effects, me.subjectId, {
@@ -463,10 +464,10 @@ export class BookingService {
       [me.subjectId, new Date(now - ACTIVE_BOOKING_MAX_AGE_MS)],
     );
     // C1: a booking of a business day that is over is never "current", even before the scheduler closes it out.
-    const lookahead = (await SettingsRepo.get(t.db)).booking_opens_before_minutes * MINUTE;
+    const win = dayWindow(await SettingsRepo.get(t.db));
     let row: BookingRow | undefined;
     for (const r of rows) {
-      if (!isStaleDay(await schedulesOf(t.db, r.staff_id), t.salon.timezone, r.work_date, now, lookahead)) {
+      if (!isStaleDay(await schedulesOf(t.db, r.staff_id), t.salon.timezone, r.work_date, now, win)) {
         row = r;
         break;
       }

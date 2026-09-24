@@ -20,7 +20,8 @@ Production: `npm run build && npm start` (set `NODE_ENV=production` and the secr
 **Startup checks (review M3):** the server (and the CLIs) refuse to start unless `NODE_ENV` is set
 explicitly to `development`, `test` or `production`, and — whenever it is not `test` — unless
 `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` and `RESET_CODE_PEPPER` are real secrets (≥ 32 chars, all
-different, not a placeholder). Generate each with
+different, not a placeholder, not trivially repetitive; surrounding whitespace does not count — an empty
+`NAME=` line is "not set"). Generate each with
 `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`.
 
 ## Tests
@@ -60,7 +61,12 @@ See `.env.example` for the full list with defaults. The important ones:
 | `TRUST_PROXY` | whose `X-Forwarded-For` to trust for the client IP (rate limits/backoff): `false`, a hop count, or a comma-separated list of proxy IPs/CIDRs. `true` is refused in production — see "Behind nginx" |
 | `CORS_ORIGINS` | comma-separated browser origins; empty = CORS off (mobile apps don't need it) |
 | `BACKOFF_*` | progressive login backoff per account+IP and per IP; `BACKOFF_ACCOUNT_*` a slow account-wide delay (all IPs, capped at a few seconds, never a lockout) |
+| `REFRESH_REUSE_GRACE_SEC` (30) | a rotated refresh token re-presented within this window (lost answer) gets one fresh pair instead of revoking the session; 0 = off |
 | `MAX_PENDING_SALONS` | self-registration pauses (`503 REGISTRATION_PAUSED`) while this many salons wait for activation (default 50) |
+
+**Rate limits (round 2, M1):** per IP and per account+IP they are hard limits (`429`); per account across all
+IPs they only *delay* (progressively, capped by `BACKOFF_ACCOUNT_MAX_DELAY_MS`) — never refuse, so nobody can
+lock a user out of his account from other addresses.
 
 ### Behind nginx (TLS termination)
 

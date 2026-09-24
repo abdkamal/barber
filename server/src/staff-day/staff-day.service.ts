@@ -22,6 +22,7 @@ import {
   loadDay,
   opensAtOn,
   operationalShift,
+  dayWindow,
   project,
   releaseExpiredOffers,
   resolveShift,
@@ -35,6 +36,7 @@ import { once, unwrap } from '../scheduling/idempotency';
 import { PostCommit } from '../scheduling/post-commit';
 import { activeServices, currentSeq } from '../scheduling/rows';
 import { dailyBreakInShift, type Shift } from '../scheduling/time';
+import { unfinishedFromClosedDays } from '../scheduling/day-close';
 
 const iso = (t: number | Date | null | undefined) => (t === null || t === undefined ? null : new Date(t).toISOString());
 
@@ -46,6 +48,7 @@ export function staffSettings(s: SettingsRow, callAheadMinutes: number, salon: {
     offerHoldMinutes: s.offer_hold_minutes,
     maxDisconnectWindowMinutes: s.max_disconnect_window_minutes,
     bookingOpensBeforeMinutes: s.booking_opens_before_minutes,
+    dayCloseGraceMinutes: s.day_close_grace_minutes,
     heartbeatSeconds: 30,
     offlineAfterSeconds: 90,
     timezone: salon.timezone,
@@ -94,7 +97,7 @@ export class StaffDayService {
     const now = this.clock.now();
     const settings = await SettingsRepo.get(t.db);
     // C1: after closing the day stays visible while customers are still being served (ق24).
-    const shift = await operationalShift(t.db, t.salon.timezone, me.subjectId, now, settings.booking_opens_before_minutes * MINUTE);
+    const shift = await operationalShift(t.db, t.salon.timezone, me.subjectId, now, dayWindow(settings));
     const services = (await activeServices(t.db)).map((s) => ({
       id: s.id,
       name: s.name,
@@ -103,7 +106,10 @@ export class StaffDayService {
       active: s.active,
     }));
     const { rows: me2 } = await t.db.query<{ call_ahead_minutes: number }>('SELECT call_ahead_minutes FROM staff WHERE id = $1', [me.subjectId]);
+    // Round 2 (item 4): services left unfinished when an earlier day was closed out — to finish (and get paid).
+    const unfinished = await unfinishedFromClosedDays(t.db, me.subjectId);
     const base = {
+      unfinishedFromPreviousDay: await bookingDtos(t.db, unfinished, undefined, { includePhone: true }),
       services,
       settings: staffSettings(settings, me2[0]?.call_ahead_minutes ?? 20, t.salon),
       serverTime: iso(now)!,
@@ -136,7 +142,7 @@ export class StaffDayService {
   async heartbeat(t: TenantContext, me: Principal, body: { deviceSeq: number; queueDigest?: string }) {
     const now = this.clock.now();
     const settings = await SettingsRepo.get(t.db);
-    const shift = await operationalShift(t.db, t.salon.timezone, me.subjectId, now, settings.booking_opens_before_minutes * MINUTE);
+    const shift = await operationalShift(t.db, t.salon.timezone, me.subjectId, now, dayWindow(settings));
     if (!shift) return { serverTime: iso(now), seq: await currentSeq(t.db), state: null, workDate: null };
     const out = await this.post.tx(t, async (q, effects) => {
       const ctx = await loadDay(q, t.salon, me.subjectId, shift, now, { lock: true, settings });

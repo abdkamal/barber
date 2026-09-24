@@ -86,19 +86,46 @@ export function shiftOrDay(schedules: readonly ScheduleRow[], tz: string, date: 
   );
 }
 
-/**
- * A past business day is "stale" once the barber's next business day has begun (its booking window
- * opened — `lookaheadMs` before opening); with no schedule in the following week, a day after it ended.
- * Stale days are closed out by the scheduler (closeStaleDays) and never shown as current.
- */
-export function isStaleDay(schedules: readonly ScheduleRow[], tz: string, date: string, now: number, lookaheadMs: number): boolean {
+/** Default of the salon setting `day_close_grace_minutes` (6 h). */
+export const DEFAULT_DAY_CLOSE_GRACE_MS = 360 * MINUTE;
+
+/** When a barber's business day opens for booking and how long a past one may stay operational. */
+export interface DayWindow {
+  /** The booking window opens this long before a shift starts (`booking_opens_before_minutes`). */
+  lookaheadMs: number;
+  /** A past day stays operational at most this long after its shift end (`day_close_grace_minutes`). */
+  graceMs: number;
+}
+
+export function dayWindow(s: Pick<SettingsRow, 'booking_opens_before_minutes' | 'day_close_grace_minutes'>): DayWindow {
+  return {
+    lookaheadMs: s.booking_opens_before_minutes * MINUTE,
+    graceMs: (s.day_close_grace_minutes ?? DEFAULT_DAY_CLOSE_GRACE_MS / MINUTE) * MINUTE,
+  };
+}
+
+/** The moment a past business day becomes stale (see isStaleDay). */
+export function staleAt(schedules: readonly ScheduleRow[], tz: string, date: string, win: DayWindow): number {
   const own = shiftOrDay(schedules, tz, date);
-  if (now < own.workEnd) return false;
+  const cap = own.workEnd + win.graceMs;
   for (let k = 1; k <= 7; k++) {
     const next = shiftOn(addDays(date, k), schedules, tz);
-    if (next && next.workStart > own.workStart) return now >= next.workStart - lookaheadMs;
+    if (next && next.workStart > own.workStart) return Math.max(own.workEnd, Math.min(cap, next.workStart - win.lookaheadMs));
   }
-  return now >= own.workEnd + 24 * 60 * MINUTE;
+  return cap;
+}
+
+/**
+ * A past business day is "stale" at the EARLIER of: the barber's next business day beginning (its
+ * booking window opened — `lookaheadMs` before opening) and the day's own shift end + a bounded grace
+ * (`day_close_grace_minutes`, round 2: a salon closed on Fridays or a barber working one day a week
+ * must not keep yesterday's queue alive for days). Never before the shift ended. Stale days are
+ * closed out by the scheduler (closeStaleDays) and never shown as current.
+ */
+export function isStaleDay(schedules: readonly ScheduleRow[], tz: string, date: string, now: number, win: DayWindow): boolean {
+  const own = shiftOrDay(schedules, tz, date);
+  if (now < own.workEnd) return false;
+  return now >= staleAt(schedules, tz, date, win);
 }
 
 /**
@@ -112,11 +139,11 @@ export async function operationalShift(
   tz: string,
   staffId: string,
   now: number,
-  lookaheadMs: number,
+  win: DayWindow,
   schedules?: readonly ScheduleRow[],
 ): Promise<Shift | null> {
   const sch = schedules ?? (await schedulesOf(q, staffId));
-  const cur = currentShift(sch, tz, now, lookaheadMs);
+  const cur = currentShift(sch, tz, now, win.lookaheadMs);
   if (cur && now >= cur.workStart) return cur;
   const { rows } = await q.query<{ work_date: string }>(
     `SELECT DISTINCT work_date::text AS work_date FROM bookings
@@ -127,7 +154,7 @@ export async function operationalShift(
   for (const r of rows) {
     if (cur && r.work_date === cur.workDate) continue;
     const s = shiftOrDay(sch, tz, r.work_date);
-    if (s.workEnd <= now && !isStaleDay(sch, tz, r.work_date, now, lookaheadMs)) return s;
+    if (s.workEnd <= now && !isStaleDay(sch, tz, r.work_date, now, win)) return s;
   }
   return cur;
 }
@@ -260,6 +287,16 @@ async function loadBreaks(q: TenantQueryable, tz: string, staffId: string, shift
     }
   }
   return out.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Creates (if needed) and locks a barber-day row FOR UPDATE — the per-barber lock every queue
+ * mutation serialises on (§5.13). Lock order everywhere: barber-day row(s) → breaks rows →
+ * change_counter (the first emitted change). Re-locking in the same transaction is a no-op.
+ */
+export async function lockDayRow(q: TenantQueryable, staffId: string, workDate: string): Promise<void> {
+  await q.query('INSERT INTO barber_days (staff_id, work_date) VALUES ($1, $2) ON CONFLICT (staff_id, work_date) DO NOTHING', [staffId, workDate]);
+  await q.query('SELECT 1 FROM barber_days WHERE staff_id = $1 AND work_date = $2 FOR UPDATE', [staffId, workDate]);
 }
 
 /**
@@ -508,29 +545,34 @@ export async function releaseExpiredOffers(q: TenantQueryable, ctx: DayCtx, effe
 // ─── ق5 reference / ق23 (server-known facts only) ─────────────────────────────────────
 
 /**
- * Records a new time the SERVER told the customer (call, ق5 notice, postponement, transfer…) as his
- * ق5 reference. When the system moves him earlier, the reference he had before that advance is kept
- * in `reference_before_advance` — the ق23 exemption is judged against it (review I1/H1). `reset`
- * forgets it (a postponement, a transfer or the customer's own change gives him a new known time).
+ * Records a new time the SERVER told the customer (call, ق5 notice, postponement, transfer…).
+ * It becomes his ق5 reference (`last_shown_expected_start`) and his server-issued reference
+ * (`told_expected_start`). When the system moves him earlier than the last SERVER-issued time,
+ * that time is kept in `reference_before_advance` — the ق23 exemption is judged against it
+ * (review I1/H1). Neither is ever derived from `last_shown_expected_start`, which the customer's
+ * app may also set ("seen", ق5 only), so client input can never widen the ق23 exemption.
+ * `reset` forgets the pre-advance reference (a postponement, a transfer or the customer's own
+ * change gives him a new known time).
  */
 export async function updateReference(q: TenantQueryable, id: string, at: number, opts: { reset?: boolean } = {}): Promise<void> {
   await q.query(
     `UPDATE bookings SET
         reference_before_advance = CASE
           WHEN $3 THEN NULL
-          WHEN $2 < COALESCE(last_shown_expected_start, original_expected_start) - interval '1 minute'
-            THEN COALESCE(reference_before_advance, last_shown_expected_start, original_expected_start)
+          WHEN $2 < COALESCE(told_expected_start, original_expected_start) - interval '1 minute'
+            THEN COALESCE(reference_before_advance, told_expected_start, original_expected_start)
           WHEN reference_before_advance IS NOT NULL AND $2 >= reference_before_advance THEN NULL
           ELSE reference_before_advance END,
+        told_expected_start = $2,
         last_shown_expected_start = $2
       WHERE id = $1`,
     [id, new Date(at), !!opts.reset],
   );
 }
 
-/** ق23: the time the customer is known (by the server) to have expected before any system advance. */
+/** ق23: the time the customer is known (by the server) to have expected before any system advance — never client input. */
 export function exemptionReference(r: BookingRow): number | undefined {
-  return (r.reference_before_advance ?? r.last_shown_expected_start ?? r.original_expected_start)?.getTime();
+  return (r.reference_before_advance ?? r.told_expected_start ?? r.original_expected_start)?.getTime();
 }
 
 // ─── Durations (ق11) ──────────────────────────────────────────────────────────────────

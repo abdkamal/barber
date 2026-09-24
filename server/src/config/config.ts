@@ -13,7 +13,23 @@ const int = (def: number) => z.coerce.number().int().default(def);
 
 const TEST_SECRET = 'test-only-insecure-secret-0123456789abcdef';
 /** Placeholders that must never be accepted as real secrets. */
-const WEAK_SECRET_RE = /change[-_ ]?me|dev[-_]only|insecure|example|placeholder|secret-?here/i;
+const WEAK_SECRET_RE = /change[-_ ]?me|dev[-_]only|insecure|example|placeholder|secret-?here|^(x+|0+|1+|test|secret|password)$/i;
+export const MIN_SECRET_LENGTH = 32;
+/** A real (random) secret of >= 32 chars has far more distinct characters than this. */
+const MIN_DISTINCT_SECRET_CHARS = 10;
+
+/**
+ * Review M3 / round 2 (item 5): whenever NODE_ENV is not `test`, each secret must be present,
+ * at least 32 characters (surrounding whitespace does not count), not a placeholder and not a
+ * trivially repetitive string. Returns the problem, or null when the secret is acceptable.
+ */
+export function secretProblem(v: string): string | null {
+  const s = v.trim();
+  if (s.length < MIN_SECRET_LENGTH) return `must be at least ${MIN_SECRET_LENGTH} characters`;
+  if (WEAK_SECRET_RE.test(s)) return 'looks like a placeholder — generate a real secret';
+  if (new Set(s).size < MIN_DISTINCT_SECRET_CHARS) return 'is too repetitive to be a real secret — generate a random one';
+  return null;
+}
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production'], { message: 'NODE_ENV must be set explicitly to development, test or production' }),
@@ -40,12 +56,15 @@ const EnvSchema = z.object({
   TENANT_POOLS_MAX: int(200),
   DIRECTORY_CACHE_TTL_MS: int(5_000),
 
-  JWT_ACCESS_SECRET: z.string().min(32).optional(),
-  JWT_REFRESH_SECRET: z.string().min(32).optional(),
+  // Secrets are validated in loadConfig (secretFrom): >= 32 chars, not a placeholder, all different.
+  JWT_ACCESS_SECRET: z.string().optional(),
+  JWT_REFRESH_SECRET: z.string().optional(),
   JWT_ISSUER: z.string().default('saloni'),
   ACCESS_TOKEN_TTL_SEC: int(15 * 60),
   REFRESH_TOKEN_TTL_DAYS: int(30),
-  RESET_CODE_PEPPER: z.string().min(32).optional(),
+  RESET_CODE_PEPPER: z.string().optional(),
+  // Round 2 (item 7): a rotated refresh token may be presented once more within this window.
+  REFRESH_REUSE_GRACE_SEC: int(30),
   RESET_CODE_TTL_HOURS: int(24),
 
   ARGON2_MEMORY_KIB: int(19_456),
@@ -75,6 +94,12 @@ export interface RateLimitRule {
   windowMs: number;
 }
 
+export interface AccountRules {
+  ip: RateLimitRule;
+  accountIp: RateLimitRule;
+  account: RateLimitRule;
+}
+
 export interface AppConfig {
   env: 'development' | 'test' | 'production';
   host: string;
@@ -98,6 +123,8 @@ export interface AppConfig {
     refreshTtlDays: number;
     resetCodePepper: string;
     resetCodeTtlHours: number;
+    /** Round 2 (item 7): grace for re-presenting the directly preceding refresh token (0 = off). */
+    refreshReuseGraceSec: number;
     argon2: { memoryCost: number; timeCost: number; parallelism: number };
   };
   backoff: {
@@ -116,11 +143,17 @@ export interface AppConfig {
     enabled: boolean;
     /** Default per-IP limit applied to every route without a specific rule. */
     global: RateLimitRule;
-    login: { ip: RateLimitRule; account: RateLimitRule };
-    register: { ip: RateLimitRule; account: RateLimitRule };
+    /**
+     * Round 2 (item 6, review M1): `ip` and `accountIp` (one account from one address) are hard
+     * limits (429). `account` (one account from ALL addresses) is DELAY-ONLY: beyond its limit each
+     * request is slowed down progressively (capped at `backoff.accountMaxDelayMs`), never refused —
+     * so nobody can lock a real user out of his own account from other addresses.
+     */
+    login: AccountRules;
+    register: AccountRules;
     salonRegister: { ip: RateLimitRule };
     refresh: { ip: RateLimitRule };
-    passwordReset: { ip: RateLimitRule; account: RateLimitRule };
+    passwordReset: AccountRules;
     publicLookup: { ip: RateLimitRule };
     sensitive: { ip: RateLimitRule };
     /** Device sync pushes per staff account (review M4). */
@@ -172,11 +205,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const e = parsed.data;
   const isTest = e.NODE_ENV === 'test';
   const secret = (v: string | undefined, name: string): string => {
-    if (v) {
-      if (!isTest && WEAK_SECRET_RE.test(v)) throw new Error(`${name} looks like a placeholder — generate a real secret`);
-      return v;
+    const given = v?.trim() ? v.trim() : undefined; // an empty `NAME=` line in .env is "not set"
+    if (given) {
+      if (!isTest) {
+        const problem = secretProblem(given);
+        if (problem) throw new Error(`${name} ${problem} (>= ${MIN_SECRET_LENGTH} chars, all different, no placeholders)`);
+      }
+      return given;
     }
-    if (!isTest) throw new Error(`${name} must be set (>= 32 chars) unless NODE_ENV=test`);
+    if (!isTest) throw new Error(`${name} must be set (>= ${MIN_SECRET_LENGTH} chars) unless NODE_ENV=test`);
     return `${TEST_SECRET}-${name}`;
   };
   const accessSecret = secret(e.JWT_ACCESS_SECRET, 'JWT_ACCESS_SECRET');
@@ -216,6 +253,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       refreshTtlDays: e.REFRESH_TOKEN_TTL_DAYS,
       resetCodePepper: pepper,
       resetCodeTtlHours: e.RESET_CODE_TTL_HOURS,
+      refreshReuseGraceSec: Math.max(0, Math.min(e.REFRESH_REUSE_GRACE_SEC, 120)),
       argon2: { memoryCost: e.ARGON2_MEMORY_KIB, timeCost: e.ARGON2_TIME_COST, parallelism: e.ARGON2_PARALLELISM },
     },
     backoff: {
@@ -236,11 +274,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     rateLimits: {
       enabled: e.RATE_LIMITS_ENABLED,
       global: { limit: 300, windowMs: min },
-      login: { ip: { limit: 30, windowMs: 15 * min }, account: { limit: 10, windowMs: 15 * min } },
-      register: { ip: { limit: 10, windowMs: hour }, account: { limit: 5, windowMs: hour } },
+      login: { ip: { limit: 30, windowMs: 15 * min }, accountIp: { limit: 10, windowMs: 15 * min }, account: { limit: 10, windowMs: 15 * min } },
+      register: { ip: { limit: 10, windowMs: hour }, accountIp: { limit: 5, windowMs: hour }, account: { limit: 5, windowMs: hour } },
       salonRegister: { ip: { limit: 3, windowMs: hour } },
       refresh: { ip: { limit: 60, windowMs: 15 * min } },
-      passwordReset: { ip: { limit: 10, windowMs: 15 * min }, account: { limit: 5, windowMs: 15 * min } },
+      passwordReset: { ip: { limit: 10, windowMs: 15 * min }, accountIp: { limit: 5, windowMs: 15 * min }, account: { limit: 5, windowMs: 15 * min } },
       publicLookup: { ip: { limit: 60, windowMs: min } },
       sensitive: { ip: { limit: 60, windowMs: 15 * min } },
       sync: { account: { limit: 60, windowMs: min } },

@@ -24,6 +24,18 @@ export class RateLimiter {
     return 0;
   }
 
+  /** Counts one hit and returns the number of hits in the current window (never refuses). */
+  count(key: string, rule: RateLimitRule): number {
+    const now = this.now();
+    this.sweep(now);
+    let b = this.buckets.get(key);
+    if (!b || b.resetAt <= now) {
+      b = { count: 0, resetAt: now + rule.windowMs };
+      this.buckets.set(key, b);
+    }
+    return ++b.count;
+  }
+
   reset(): void {
     this.buckets.clear();
   }

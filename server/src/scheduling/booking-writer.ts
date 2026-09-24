@@ -93,7 +93,7 @@ export async function placeBooking(q: TenantQueryable, ctx: DayCtx, b: NewBookin
     actorId: b.actorId,
   });
   const slot = slots.find((s) => s.bookingId === id)!;
-  await q.query('UPDATE bookings SET original_expected_start = $2, last_shown_expected_start = $2 WHERE id = $1', [id, new Date(slot.start)]);
+  await q.query('UPDATE bookings SET original_expected_start = $2, last_shown_expected_start = $2, told_expected_start = $2 WHERE id = $1', [id, new Date(slot.start)]);
   await insertBookingEvent(q, {
     bookingId: id,
     type: b.offer ? 'offered' : 'created',

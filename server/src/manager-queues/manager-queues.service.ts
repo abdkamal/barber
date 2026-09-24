@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { insertAt, MINUTE, placeWithBarber, type QueueEntry, remove } from '@saloni/engine';
+import { finishService, insertAt, MINUTE, placeWithBarber, type QueueEntry, remove } from '@saloni/engine';
 import type { Principal } from '../auth/principal';
 import { NotificationService } from '../notifications/notification.service';
 import { Texts } from '../notifications/texts';
@@ -11,11 +11,14 @@ import { Clock } from '../scheduling/clock';
 import {
   commitQueue,
   type DayCtx,
+  emitChange,
+  releaseExpiredOffers,
   estimateFor,
   insertBookingEvent,
   loadDay,
   lockDays,
   operationalShift,
+  dayWindow,
   project,
   shiftForDate,
   stateWire,
@@ -28,6 +31,7 @@ import { once, unwrap } from '../scheduling/idempotency';
 import { PostCommit } from '../scheduling/post-commit';
 import { currentSeq, type ServiceRow } from '../scheduling/rows';
 import { currentShift } from '../scheduling/time';
+import { resolveUnfinishedConflict, unfinishedFromClosedDays } from '../scheduling/day-close';
 
 const iso = (t: number | Date | null | undefined) => (t === null || t === undefined ? null : new Date(t).toISOString());
 
@@ -54,12 +58,16 @@ export class ManagerQueuesService {
   async queues(t: TenantContext) {
     const now = this.clock.now();
     const settings = await SettingsRepo.get(t.db);
-    const lookahead = settings.booking_opens_before_minutes * MINUTE;
+    const win = dayWindow(settings);
     const barbers = [];
+    // Round 2 (item 4): services left unfinished when their day was closed out, per barber.
+    const unfinishedRows = await unfinishedFromClosedDays(t.db);
+    const unfinishedDtos = await bookingDtos(t.db, unfinishedRows, undefined, { includePhone: true });
+    const unfinishedOf = (id: string) => unfinishedDtos.filter((b) => b.barberId === id);
     for (const s of await workingStaff(t.db)) {
-      const shift = await operationalShift(t.db, t.salon.timezone, s.id, now, lookahead, s.schedules);
+      const shift = await operationalShift(t.db, t.salon.timezone, s.id, now, win, s.schedules);
       if (!shift) {
-        barbers.push({ id: s.id, name: s.name, role: s.role, day: null, accepting: false, queue: [] });
+        barbers.push({ id: s.id, name: s.name, role: s.role, day: null, accepting: false, queue: [], unfinishedFromPreviousDay: unfinishedOf(s.id) });
         continue;
       }
       const ctx = await loadDay(t.db, t.salon, s.id, shift, now, { settings, staff: s });
@@ -79,9 +87,11 @@ export class ManagerQueuesService {
         },
         accepting: ctx.gate.accepts,
         queue: await bookingDtos(t.db, rows, slots, { includePhone: true }),
+        unfinishedFromPreviousDay: unfinishedOf(s.id),
       });
     }
-    return { serverTime: iso(now)!, seq: await currentSeq(t.db), barbers };
+    // All of them at the top level too (also those of staff without a schedule any more).
+    return { serverTime: iso(now)!, seq: await currentSeq(t.db), barbers, unfinishedFromPreviousDay: unfinishedDtos };
   }
 
   async transfer(t: TenantContext, me: Principal, id: string, toBarberId: string, key: string | null, ip: string): Promise<BookingDto> {
@@ -203,6 +213,91 @@ export class ManagerQueuesService {
         });
         const fresh = (await loadBooking(q, id))!;
         const [dto] = await bookingDtos(q, [fresh], new Map([[id, slot]]), { includePhone: true });
+        return { status: 200, body: dto! };
+      }),
+    );
+    return unwrap(out);
+  }
+
+  /**
+   * Round 2 (item 4): the manager resolves a service left unfinished when its day was closed out —
+   * finish it with the actual end time (a payment awaiting confirmation is created at the server
+   * price; the duration is never learned from) or cancel it with a reason. Runs in the locked day
+   * of the booking; recorded (booking_events + audit_log); the conflict is marked resolved.
+   */
+  async resolveUnfinished(
+    t: TenantContext,
+    me: Principal,
+    id: string,
+    body: { action: 'finish'; actualEnd: string } | { action: 'cancel'; reason: string },
+    key: string | null,
+    ip: string,
+  ): Promise<BookingDto> {
+    const out = await this.post.tx(t, (q, effects) =>
+      once<BookingDto>(q, { kind: 'staff', id: me.subjectId }, key, `resolve_unfinished:${id}`, async () => {
+        const now = this.clock.now();
+        const row = await loadBooking(q, id);
+        if (!row || row.status === 'offered' || row.status === 'expired') throw QErrors.bookingNotFound();
+        const shift = await shiftForDate(q, t.salon.timezone, row.staff_id, row.work_date);
+        const ctx = await loadDay(q, t.salon, row.staff_id, shift, now, { lock: true });
+        const fresh = (await loadBooking(q, id))!;
+        if (fresh.status !== 'in_service' || !fresh.day_closed_at || !fresh.actual_start) throw QErrors.notUnfinished();
+        await releaseExpiredOffers(q, ctx, effects);
+        const start = fresh.actual_start.getTime();
+        if (body.action === 'finish') {
+          const end = Date.parse(body.actualEnd);
+          if (!Number.isFinite(end) || end < start || end > now + 2 * MINUTE) throw QErrors.invalidEndTime();
+          await q.query("UPDATE bookings SET status = 'done', actual_end = $2, queue_position = NULL, updated_at = now() WHERE id = $1", [id, new Date(end)]);
+          await commitQueue(q, ctx, finishService(ctx.queue, id), { reason: 'finished', primary: [id], effects, actorKind: 'staff', actorId: me.subjectId });
+          await insertBookingEvent(q, {
+            bookingId: id,
+            type: 'service_finished',
+            payload: { durationSec: Math.round((end - start) / 1000), resolvedByManager: true },
+            occurredAt: end,
+            actorKind: 'staff',
+            actorId: me.subjectId,
+            approximate: true,
+            reason: 'manager_resolved',
+          });
+          await q.query(
+            `INSERT INTO duration_samples (staff_id, service_set_key, customer_id, booking_id, duration_seconds, excluded, exclusion_reason)
+             VALUES ($1, $2, $3, $4, $5, true, 'after_day_close')`,
+            [fresh.staff_id, fresh.service_set_key ?? '', fresh.customer_id, id, Math.max(0, Math.round((end - start) / 1000))],
+          );
+          const { rows: svc } = await q.query<{ total: string }>('SELECT COALESCE(sum(price_minor), 0) AS total FROM booking_services WHERE booking_id = $1', [id]);
+          const amount = Number(svc[0]!.total);
+          await q.query('INSERT INTO payments (booking_id, amount_minor) VALUES ($1, $2) ON CONFLICT (booking_id) DO NOTHING', [id, amount]);
+          await emitBooking(q, ctx, id, 'booking_updated', effects);
+          await emitChange(q, effects, { staffId: fresh.staff_id, type: 'payment_updated', entity: 'payment', bookingId: id, data: { bookingId: id, status: 'awaiting_confirmation', amountCents: amount } });
+        } else {
+          await q.query(
+            "UPDATE bookings SET status = 'cancelled', queue_position = NULL, cancel_reason = $2, cancelled_at = $3, updated_at = now() WHERE id = $1",
+            [id, `manager: ${body.reason.trim()}`, new Date(now)],
+          );
+          await commitQueue(q, ctx, ctx.queue.filter((e) => e.bookingId !== id), { reason: 'cancelled_ahead', primary: [id], effects, actorKind: 'staff', actorId: me.subjectId });
+          await insertBookingEvent(q, {
+            bookingId: id,
+            type: 'cancelled',
+            payload: { previousStatus: 'in_service', reason: body.reason.trim(), resolvedByManager: true },
+            occurredAt: now,
+            actorKind: 'staff',
+            actorId: me.subjectId,
+            reason: 'manager_resolved',
+          });
+          await emitBooking(q, ctx, id, 'booking_removed', effects);
+        }
+        await resolveUnfinishedConflict(q, id, me.subjectId);
+        await writeAudit(q, {
+          actorKind: 'staff',
+          actorId: me.subjectId,
+          action: 'booking.unfinished_resolved',
+          targetKind: 'booking',
+          targetId: id,
+          ip,
+          details: body.action === 'finish' ? { action: 'finish', actualEnd: new Date(Date.parse(body.actualEnd)).toISOString() } : { action: 'cancel', reason: body.reason.trim() },
+        });
+        const done = (await loadBooking(q, id))!;
+        const [dto] = await bookingDtos(q, [done], undefined, { includePhone: true });
         return { status: 200, body: dto! };
       }),
     );

@@ -12,6 +12,10 @@ import { CurrentPrincipal, Tenant } from '../tenancy/tenant.decorator';
 import { ManagerQueuesService } from './manager-queues.service';
 
 const Transfer = z.object({ toBarberId: z.string().uuid() }).strict();
+const Resolve = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('finish'), actualEnd: z.string().datetime({ offset: true }) }).strict(),
+  z.object({ action: z.literal('cancel'), reason: z.string().trim().min(1).max(200) }).strict(),
+]);
 const idParam = new ParseUUIDPipe({ exceptionFactory: () => Errors.notFound() });
 
 /** Manager: all queues today and manual transfer between barbers (api.md "المدير" → الطوابير, ق25). */
@@ -36,5 +40,19 @@ export class ManagerQueuesController {
     @Headers('idempotency-key') key?: string,
   ) {
     return this.svc.transfer(t, me, id, body.toBarberId, idempotencyKey(key), clientIp(req));
+  }
+
+  /** Round 2 (item 4): finish (with the actual end time) or cancel a service left unfinished at day close. */
+  @Post('bookings/:id/resolve')
+  @HttpCode(200)
+  resolve(
+    @Tenant() t: TenantContext,
+    @CurrentPrincipal() me: Principal,
+    @Param('id', idParam) id: string,
+    @Body(new ZodPipe(Resolve)) body: z.infer<typeof Resolve>,
+    @Req() req: Request,
+    @Headers('idempotency-key') key?: string,
+  ) {
+    return this.svc.resolveUnfinished(t, me, id, body, idempotencyKey(key), clientIp(req));
   }
 }

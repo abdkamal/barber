@@ -48,7 +48,7 @@ describe('lockDays', () => {
       original_expected_start: null, last_shown_expected_start: null, postpone_used: false, actual_start: null, actual_end: null, source: 'app',
       work_date: workDate, offer_expires_at: new Date(now - 1000), estimated_duration_seconds: 1800, service_set_key: 'x', projected_start: null,
       projected_end: null, last_change_reason: null, last_change_at: null, called_at: null, cancelled_at: null, cancel_reason: null,
-      overrun_alerted_at: null, serve_late: false, replaces_booking_id: null, needs_review: false, reference_before_advance: null,
+      overrun_alerted_at: null, serve_late: false, replaces_booking_id: null, needs_review: false, reference_before_advance: null, told_expected_start: null,
       day_closed_at: null, created_at: new Date(now - 60_000), updated_at: new Date(now), customer_name: 'n', customer_phone: '0500000000',
       customer_is_walk_in: false,
     };
