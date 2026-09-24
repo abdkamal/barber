@@ -108,10 +108,13 @@ class _ServiceChipState extends State<ServiceChip> {
                             color: c.inkMuted,
                           ),
                           const SizedBox(width: 4),
-                          Text(
-                            '${widget.minutes} دقيقة',
-                            style: SaloniTextStyles.caption.copyWith(
-                              color: c.inkMuted,
+                          Flexible(
+                            child: Text(
+                              '${widget.minutes} دقيقة',
+                              overflow: TextOverflow.ellipsis,
+                              style: SaloniTextStyles.caption.copyWith(
+                                color: c.inkMuted,
+                              ),
                             ),
                           ),
                         ],

@@ -52,6 +52,18 @@
 | `GET /staff/payments` | بانتظار التأكيد / مؤكدة |
 | `WS /staff/stream` | يدفع التغييرات بأرقامها لحظيًا |
 
+### أشكال مثبّتة (المعلم 4ب)
+- **الحجز** (`Booking`): `{id, customerId, barberId, serviceIds[], kind, requestedAt?, status, queuePosition?, originalEta, lastShownEta?, postponementUsed, actualStart?, actualEnd?, source: app|barber, walkIn, createdAt}` مع حقول إضافية: `workDate, customerName, services[{id,name,priceCents,baseDurationMin}], priceCents, estimatedDurationMin, eta, etaEnd, calledAt, offerExpiresAt, lastChangeReason, serveLate, needsReview` (+ `customerPhone` في قوائم الطاقم). الحالة `expired` (عرض منتهٍ) لا تظهر في القوائم.
+- `GET /staff/today` ← `{day: {workDate, workStart, workEnd, state, firstConnectedAt} | null, queue[Booking], services[], breaks[{id, kind: rest|prayer|emergency, start, end, open}], walkInOnly[{id, start, end}], closingWarnings[bookingId], settings{callAheadMinutes, etaChangeNotifyMinutes, overrunAlertPercent, …}, serverTime, seq}`.
+- `POST /sync/events` بجسم `{events: [...]}` (حتى 200) ← مصفوفة `[{eventId, result: applied|duplicate|rejected, reason?}]` بترتيب الإرسال.
+- `GET /sync?since=` ← `{changes: [SyncChange], seq, hasMore, serverTime}`، و**`SyncChange` = `{seq, type, bookingId?, data, occurredAt}`**. الأنواع: `booking_created`، `booking_offered`، `booking_updated`، `booking_called`، `booking_removed` (`data` = الحجز)، `queue_updated` (`data = {workDate, reason, queue[{bookingId, status, position, eta, etaEnd}]}`)، `payment_updated`، `break_started`/`break_ended`، `day_state`. التغييرات التي تكتبها وحدات أخرى دون نوع تصل بنوع `{entity}_{op}`.
+- `POST /heartbeat` ← `{serverTime, seq, workDate, state, reconnected}`.
+- `WS /v1/staff/stream`: المصادقة برمز الوصول نفسه (ترويسة `Authorization` أو `?access_token=`)؛ الرسائل `{type: "hello", seq, serverTime}` ثم `{type: "changes", seq}`؛ يُغلق الاتصال (4401) عند انتهاء الرمز أو إلغاء الجلسة.
+- `GET /bookings/current` ← كما أعلاه + `etaEnd, lastChangeReasonCode, dayState, barber{id,name}, serverTime`؛ `404 NO_ACTIVE_BOOKING` إن لم يوجد حجز نشط.
+- `POST /bookings/{id}/change-time` عند تعذّر الساعة: `409 SLOT_UNAVAILABLE` ويبقى الحجز كما هو، و`error.details.offer` عرض (بصيغة `quote`) محجوز مؤقتًا؛ قبوله `POST /bookings {offerId}` ينقل الحجز نفسه.
+- `POST /staff/impact` ← `{bookingId, oldDurationMin, newDurationMin, oldPriceCents, newPriceCents, changes[{bookingId, customerName, before, after, deltaMin, pastClosing, notify}], pastClosing[{bookingId, customerName, end, newlyPastClosing}], workEnd}`.
+- `GET /staff/payments` ← `[{id, bookingId, amountCents, status, confirmedBy, confirmedAt, barberId, customerName, workDate, finishedAt, createdAt}]`.
+
 ### أحداث الجهاز
 كل حدث: `{id (UUID), deviceSeq, type, bookingId?, occurredAt, approximate, payload}`.
 
@@ -82,4 +94,4 @@
 | التقارير | `GET /manager/reports?from=&to=` (§9) |
 
 ## التنبيهات (FCM)
-`{type, bookingId, title, body}` — الأنواع: `booking_confirmed`، `called`، `eta_changed`، `postponed`، `no_show`، `cancelled_closing`، `transferred`، `overrun` (للحلاق)، `account_pending`، `barber_not_connected`، `sync_conflict` (للمدير). النصوص كما في التصميم §8.
+`{type, bookingId, title, body}` — الأنواع: `booking_confirmed`، `called`، `eta_changed`، `postponed`، `no_show`، `cancelled_closing`، `transferred`، `overrun` (للحلاق)، `account_pending`، `barber_not_connected`، `barber_absent`، `sync_conflict` (للمدير). قيم `data` نصية. النصوص كما في التصميم §8.

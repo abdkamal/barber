@@ -1,6 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- الاتصال بالسيرفر (docs/api.md) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- مسح رمز QR للصالون (ق7) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- إذن الإشعارات الصريح على أندرويد 13+ (design.md §8، ق31) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
-        android:label="customer"
+        android:label="صالوني"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

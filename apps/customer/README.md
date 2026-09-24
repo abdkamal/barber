@@ -1,17 +1,125 @@
-# customer
+# صالوني — تطبيق الزبون (احجز دوري)
 
-A new Flutter project.
+تطبيق Flutter للزبون — عربي بالكامل، RTL، Material 3، Riverpod. يعمل **متصلًا
+فقط** (لا تخزين محلي للحجوزات)، ويتابع دوره بإشعارات FCM + تحديث دوري كل 30
+ثانية أثناء فتح شاشة المتابعة (design.md §10، §5.9، ق31).
 
-## Getting Started
+## التشغيل
 
-This project is a starting point for a Flutter application.
+```bash
+export PATH=/opt/sdk/flutter/bin:$PATH   # بيئة هذا المستودع
+cd apps/customer
+flutter pub get
+flutter run --dart-define=SALONI_API_BASE_URL=http://<عنوان السيرفر>:3000
+```
 
-A few resources to get you started if this is your first Flutter project:
+بلا `--dart-define` يُستخدم `http://10.0.2.2:3000` (مناسب لمحاكي أندرويد
+المتصل بسيرفر يعمل على نفس جهاز التطوير).
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+### الفحوص
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter analyze   # نظيف
+flutter test      # أخضر (اختبار واحد مُعطَّل عمدًا — انظر «مشكلات معروفة» أدناه)
+flutter build web # فحص تجميع/تدخين فقط؛ المنتج المستهدف أندرويد
+```
+
+بناء APK حقيقي يحتاج Android SDK (غير متوفر في بيئة التطوير الحالية —
+`docs/environment.md`)، لذلك لم يُبنَ APK هنا.
+
+## إعداد FCM (Firebase Cloud Messaging)
+
+التطبيق **يعمل بلا `google-services.json`**: عند تعذّر تهيئة Firebase يُكمل
+التطبيق عمله بلا إشعارات، ويعرض تحذيرًا عربيًا واضحًا في الشاشة الرئيسية (ق31،
+`lib/widgets/notification_warning_banner.dart`) بدل التعطل. المتابعة تبقى
+تعمل عبر الاستطلاع الدوري كل 30 ثانية.
+
+لتفعيل الإشعارات فعليًا:
+1. أنشئ تطبيق أندرويد في مشروع Firebase بمعرّف الحزمة `sa.saloni.customer`.
+2. نزّل `google-services.json` وضعه في `android/app/`.
+3. أضف مكوّن Gradle الإضافي في `android/settings.gradle.kts`
+   (`id("com.google.gms.google-services") version "..." apply false`) وفعّله
+   في `android/app/build.gradle.kts` (`id("com.google.gms.google-services")`).
+4. أعد البناء — `NotificationService` سيسجّل رمز FCM تلقائيًا عبر
+   `POST /devices` عند أول تشغيل (بعد فحص إذن الإشعارات وتوفر خدمات Google
+   Play، design.md §8).
+
+## الشاشات المنفَّذة (design.md §10)
+
+رمز الصالون/QR ← حول الصالون (قبل الدخول) ← تسجيل/دخول (+«الدخول تلقائيًا»،
+ق17) ← بانتظار الاعتماد (إن لزم) ← الرئيسية (تبويبات: حجزي، الصالون، السجل،
+حسابي) ← الحجز (خدمة أو أكثر، حلاق معيّن أو «الأسرع»، أقرب دور/ساعة محددة،
+عرض أقرب وقت مع عدّاد تنازلي دقيقتان) ← المتابعة (الوقت المتوقع، الأصلي
+والسبب، شريط التقدّم بلا أرقام، حالة الاستدعاء، «آخر تحديث» دائمًا، حالة
+الوقت التقديري عند الانقطاع) ← تعديل الوقت ← إلغاء (تأكيد صريح، ق29) ← السجل
+(حالة الدفع) ← الحساب (تسجيل الخروج، المظهر، الصالونات المحفوظة، ق7).
+
+جولة تعريفية مختصرة قابلة للإغلاق تظهر عند أول استخدام لشاشة الحجز
+(`lib/widgets/onboarding_tip.dart`، مبدأ السياسة رقم 11)، وتحذير مستقل عند
+تعذّر الإشعارات/خدمات Google (ق31).
+
+## البنية
+
+- `lib/services/customer_api.dart` — واجهة `CustomerApi` تفصل الشاشات عن
+  `ApiClient` الحقيقي؛ `RealCustomerApi` يفوّض إليه، و`FakeCustomerApi`
+  (في `test/fakes/`) يحاكيه في الاختبارات بلا شبكة.
+- `lib/services/multi_salon_store.dart` + `salon_scoped_token_store.dart` —
+  حساب مستقل لكل صالون على الجهاز (ق7): الجلسات في التخزين الآمن، رمز
+  الصالون الفعّال في تفضيلات عادية.
+- `lib/providers/session_controller.dart` — آلة حالة الجلسة (Riverpod):
+  بلا صالون / بانتظار الاعتماد / جاهز / خطأ.
+- `lib/screens/**` — شاشة لكل خطوة في التدفق أعلاه، كل شاشة تأخذ
+  `CustomerApi` وبيانات بسيطة كمُدخلات، ما يجعلها قابلة للاختبار مباشرة.
+
+## ملاحظات صدق ونقاط تحتاج تأكيدًا
+
+- **رمز حالة «بانتظار الاعتماد»**: `docs/api.md` لا يوثّق رمز خطأ حرفيًا لهذه
+  الحالة عند استدعاء نقاط الزبون المحمية لحساب لم يُعتمد. اعتُمد `ACCOUNT_PENDING`
+  كأقرب قراءة متّسقة مع تسمية بقية الأكواد — يحتاج تأكيدًا من فريق السيرفر
+  (`lib/providers/session_controller.dart`).
+- **شكل `GET /customer/today`**: `docs/api.md` يصف المحتوى نصيًا فقط
+  («الخدمات، الحلاقون وحالتهم»). افتُرض `{"services": [...], "barbers": [...]}`
+  بأشكال `Service`/`Barber` من `saloni_api` (`lib/screens/booking/book_screen.dart`).
+- **شكل عناصر `GET /customer/history`**: كذلك موصوف نصيًا فقط. افتُرضت حقول
+  شائعة الأسماء (`barberName`/`serviceNames`/`priceCents`/`paymentStatus`) مع
+  قيم احتياطية آمنة (`lib/screens/history/history_screen.dart`).
+- **منطقة الوقت المعروضة**: الأوقات تُعرض بتوقيت الجهاز المحلي، لا بتوقيت
+  الصالون (`salon.timezone`) — تحويل منطقة زمنية دقيق يحتاج حزمة `timezone`
+  غير المضافة هنا (`lib/widgets/format.dart`).
+- **`POST /bookings/{id}/change-time`**: العقد يوثّق «نقل ذري أو عرض أقرب
+  وقت» لكن توقيع العميل في `saloni_api` يعيد `Booking` مباشرة بلا مسار عرض
+  منفصل؛ اعتُمد أن نجاح الاستدعاء يعني النقل، وفشله (خطأ) يعني بقاء الحجز
+  كما هو — يحتاج تأكيدًا مع تفاصيل استجابة العرض الفعلية إن وُجدت.
+- تم استخدام Navigator إمبراطوري (imperative) بدل `go_router` لتدفق ما قبل
+  الدخول، لأنه تدفق تسلسلي بسيط بلا حاجة لروابط عميقة (deep links)؛ أُزيلت
+  تبعية `go_router` غير المستخدمة تبعًا لذلك.
+
+## مشكلات معروفة في `packages/saloni_ui` (تحتاج تعديلًا هناك، خارج نطاق هذا التطبيق)
+
+هذه الحزمة مشتركة ولا يجوز تعديلها من هنا وفق تعليمات المهمة؛ سُجِّلت هنا
+لتُصلَح مركزيًا:
+
+1. **`QueueProgress`** (`lib/src/widgets/queue_progress.dart`): الصفّ العلوي
+   (التسمية + «آخر تحديث») بلا `Flexible`/`Expanded`، فيفيض أفقيًا إذا طال
+   نص «آخر تحديث» (مثلًا «قبل 12 دقيقة») بجانب التسمية. تجنّبناه في
+   `TrackScreen` بعدم تمرير `updated` لهذا العنصر (يبقى معروضًا في `EtaCard`
+   المجاور دائمًا)، لكن الإصلاح الجذري في الحزمة نفسه.
+2. **`ServiceChip`**: صفّ الأيقونة+المدة الداخلي بلا `Flexible` حول نص المدة،
+   فيفيض عند تكبير حجم الخط (مثلًا 1.3×) على عرض 360px. اختبار
+   `test/rtl_overflow_test.dart` لشاشة الحجز معطَّل (`skip`) لهذا السبب مع
+   توثيق كامل داخله.
+3. **`OfferCard`**: الصفّ الذي يجمع رقم الوقت الكبير مع «عند {اسم الحلاق}»
+   بلا `Flexible` حول اسم الحلاق، فيفيض أفقيًا مع أي اسم حلاق واقعي حتى بعرض
+   الشاشة القياسي (390px) — يظهر هذا في شاشة عرض «أقرب وقت متاح» الفعلية، لا
+   فقط في اختبار ضيق. اختبار `test/booking_flow_test.dart` الخاص بهذه الحالة
+   يتجاهل تحذير الفيض الرسومي فقط (مع توثيق داخل الاختبار) ليتحقق من منطق
+   القبول والعدّاد، لكن **يوصى بإصلاح الحزمة قبل اعتماد نسخة التطوير** لأن هذا
+   يؤثر بصريًا على شاشة حقيقية يراها الزبون.
+
+## متطلب الأندرويد
+
+`android/app/src/main/AndroidManifest.xml` يضيف: `INTERNET` (الاتصال
+بالسيرفر)، `CAMERA` (مسح QR عبر `mobile_scanner`)، و`POST_NOTIFICATIONS`
+(إذن الإشعارات الصريح على أندرويد 13+). لم يُعدَّل أي ملف Gradle لإضافة
+مكوّن Firebase الإضافي (`google-services`) لأن ملف الإعداد غير متوفر — انظر
+قسم «إعداد FCM» أعلاه.

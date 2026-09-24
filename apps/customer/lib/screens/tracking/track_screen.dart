@@ -165,7 +165,7 @@ class _Loaded extends StatelessWidget {
         ui.QueueProgress(
           done: current.progress.done,
           ahead: current.progress.ahead,
-          updated: formatAgo(current.lastUpdateAt),
+          // «آخر تحديث» يظهر في EtaCard أعلاه، فلا يتكرر هنا.
           note: current.live ? null : 'لم يصلنا تحديث من الصالون — قد يكون الترتيب تغيّر',
         ),
         if (canModify) ...[

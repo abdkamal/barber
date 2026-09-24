@@ -1,5 +1,4 @@
 import 'package:customer/screens/booking/book_screen.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:saloni_api/saloni_api.dart';
 
@@ -72,16 +71,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // اختيار الخدمة يكفي لتشغيل طلب عرض السعر؛ السيرفر (الوهمي هنا) هو من
+    // يقرر عرض أقرب وقت بدل القبول الفوري (design.md §5.3) — لا حاجة
+    // لمحاكاة اختيار «ساعة محددة» في هذا الاختبار.
     await tester.tap(find.textContaining('شعر ولحية').first);
-    await tester.pump(const Duration(milliseconds: 50));
-
-    // التبديل إلى «ساعة محددة» ثم اختيار وقت — يُشغّل طلب عرض السعر.
-    await tester.tap(find.text('ساعة محددة'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('اختر الساعة المطلوبة'));
-    await tester.pumpAndSettle();
-    // مربع حوار اختيار الوقت الافتراضي — نؤكد القيمة الحالية.
-    await tester.tap(find.text('OK'));
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
 

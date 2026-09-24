@@ -533,4 +533,37 @@ void main() {
     );
     _expectNoOverflow(tester);
   });
+
+  // Regressions reported by the customer app (overflow in real use).
+  testWidgets('OfferCard — اسم حلاق طويل لا يفيض عند 390', (tester) async {
+    await tester.pumpWidget(_harness(
+      OfferCard(
+        requested: '5:00 م',
+        offered: '5:25 م',
+        barber: 'عبدالرحمن بن عبدالعزيز الحربي',
+        secondsLeft: 84,
+        total: 120,
+        onAccept: () {},
+        onDecline: () {},
+      ),
+      width: 390,
+    ));
+    _expectNoOverflow(tester);
+  });
+
+  testWidgets('ServiceChip — 360 مع تكبير النص 1.3', (tester) async {
+    await tester.pumpWidget(_harness(
+      ServiceChip(name: 'حلاقة شعر ولحية مع تصفيف', minutes: 45, price: '60', selected: true, onToggle: (_) {}),
+      textScale: 1.3,
+    ));
+    _expectNoOverflow(tester);
+  });
+
+  testWidgets('QueueProgress — نص «آخر تحديث» طويل', (tester) async {
+    await tester.pumpWidget(_harness(
+      const QueueProgress(done: 3, ahead: 2, updated: 'قبل 12 دقيقة من الآن تقريبًا'),
+      textScale: 1.3,
+    ));
+    _expectNoOverflow(tester);
+  });
 }

@@ -49,15 +49,24 @@ class QueueProgress extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  label ?? 'تقدّم الطابور',
-                  style: SaloniTextStyles.caption.copyWith(color: c.inkMuted),
-                ),
-                if (updated != null)
-                  Text(
-                    'آخر تحديث $updated',
+                Flexible(
+                  child: Text(
+                    label ?? 'تقدّم الطابور',
+                    overflow: TextOverflow.ellipsis,
                     style: SaloniTextStyles.caption.copyWith(color: c.inkMuted),
                   ),
+                ),
+                if (updated != null) ...[
+                  const SizedBox(width: SaloniSpacing.space2),
+                  Flexible(
+                    child: Text(
+                      'آخر تحديث $updated',
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: SaloniTextStyles.caption.copyWith(color: c.inkMuted),
+                    ),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: SaloniSpacing.space2),

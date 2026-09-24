@@ -11,6 +11,7 @@ class FakeCustomerApi implements CustomerApi {
     List<dynamic>? history,
   })  : salonProfile = profile ?? _defaultProfile,
         customerToday = today ?? _defaultToday,
+        // ignore: prefer_initializing_formals — القيمة الافتراضية `null` معلنة صراحة هنا لوضوحها.
         _currentBooking = currentBooking,
         historyItems = history ?? [];
 

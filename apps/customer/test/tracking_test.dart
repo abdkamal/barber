@@ -1,5 +1,4 @@
 import 'package:customer/screens/tracking/track_screen.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:saloni_api/saloni_api.dart';
 
@@ -48,7 +47,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('السبب'), findsOneWidget);
+    expect(find.textContaining('كان متوقعًا'), findsOneWidget);
     expect(find.textContaining('تمديد خدمة سابقة'), findsWidgets);
     expect(find.text('تعديل الوقت'), findsOneWidget);
     expect(find.text('إلغاء الحجز'), findsOneWidget);

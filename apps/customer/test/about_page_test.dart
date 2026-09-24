@@ -25,8 +25,10 @@ void main() {
     expect(find.textContaining('حلاقة شعر'), findsWidgets);
     expect(find.textContaining('واكس تصفيف'), findsWidgets);
 
-    // زر «سجّل واحجز دوري» يستدعي onContinue.
+    // زر «سجّل واحجز دوري» يستدعي onContinue (قد يحتاج تمريرًا للأسفل).
     final button = find.text('سجّل واحجز دوري');
+    await tester.scrollUntilVisible(button, 300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     expect(button, findsOneWidget);
     await tester.tap(button);
     await tester.pumpAndSettle();

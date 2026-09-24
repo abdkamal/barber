@@ -54,9 +54,10 @@ class OfferCard extends StatelessWidget {
                 ],
               ),
             ),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
+            // Wrap, not Row: a long barber name moves to the next line instead of overflowing.
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.end,
+              spacing: SaloniSpacing.space1,
               children: [
                 Directionality(
                   textDirection: TextDirection.ltr,
@@ -73,7 +74,7 @@ class OfferCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  ' عند $barber',
+                  'عند $barber',
                   style: SaloniTextStyles.body.copyWith(color: c.inkMuted),
                 ),
               ],
