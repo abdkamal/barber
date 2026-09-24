@@ -63,6 +63,13 @@ sudo bash /opt/saloni/deploy/vendor.sh activate RAHA-27  # التفعيل
 `reset-manager-password <الرمز>` (رمز لمرة واحدة لإعادة كلمة مرور المدير)، `cleanup-pending` (حذف تسجيلات قديمة لم تُفعَّل).
 للقائمة: `sudo bash /opt/saloni/deploy/vendor.sh`
 
+## تفعيل الإشعارات (Firebase)
+1. من Firebase: إعدادات المشروع ← **Service accounts** ← **Generate new private key** ← يُنزَّل ملف JSON.
+2. ارفعه إلى الخادم (من جهازك): `scp firebase-key.json root@IP-الخادم:/root/`
+3. على الخادم: `bash /opt/saloni/deploy/enable-push.sh /root/firebase-key.json` ثم احذف الأصل: `rm /root/firebase-key.json`
+
+الملف سرّي: لا ترسله لأحد ولا تضعه في GitHub. يُحفظ في `deploy/secrets/` ويقرؤه السيرفر فقط.
+
 ## النسخ الاحتياطي
 ```bash
 sudo bash /opt/saloni/deploy/backup.sh

@@ -1,3 +1,5 @@
 .env
 backups/
 edge-site.caddy
+secrets/*
+!secrets/.gitkeep
