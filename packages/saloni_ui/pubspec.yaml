@@ -1,0 +1,49 @@
+name: saloni_ui
+description: >
+  نظام التصميم المشترك «صالوني» — الرموز (الألوان، الطباعة، المسافات) والمكوّنات
+  المشتركة بين تطبيق الزبون وتطبيق الطاقم. Flutter design system package for the
+  Saloni barber-queue apps.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  phosphor_flutter: ^2.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  fonts:
+    - family: El Messiri
+      fonts:
+        - asset: assets/fonts/ElMessiri.ttf
+          weight: 500
+        - asset: assets/fonts/ElMessiri.ttf
+          weight: 600
+        - asset: assets/fonts/ElMessiri.ttf
+          weight: 700
+    - family: IBM Plex Sans Arabic
+      fonts:
+        - asset: assets/fonts/IBMPlexSansArabic-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/IBMPlexSansArabic-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/IBMPlexSansArabic-SemiBold.ttf
+          weight: 600
+    - family: IBM Plex Mono
+      fonts:
+        - asset: assets/fonts/IBMPlexMono-Medium.ttf
+          weight: 500
+
+  assets:
+    - assets/fonts/licenses/

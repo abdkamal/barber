@@ -1,0 +1,53 @@
+# Saloni — development infrastructure: PostgreSQL 16 + PgBouncer (transaction pooling).
+# NOT for production: credentials below are dev-only defaults.
+name: saloni-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${SALONI_PG_USER:-saloni}
+      POSTGRES_PASSWORD: ${SALONI_PG_PASSWORD:-saloni_dev_password}
+      POSTGRES_DB: ${SALONI_PG_BOOTSTRAP_DB:-postgres}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --encoding=UTF8 --locale=C.UTF-8"
+    ports:
+      - "${SALONI_PG_PORT:-5432}:5432"
+    volumes:
+      - saloni_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # No DB_NAME => wildcard entry "* = host=postgres", so every salon database
+      # created at runtime is reachable without reconfiguring PgBouncer.
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${SALONI_PG_USER:-saloni}
+      DB_PASSWORD: ${SALONI_PG_PASSWORD:-saloni_dev_password}
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "1000"
+      DEFAULT_POOL_SIZE: "5"
+      MAX_DB_CONNECTIONS: "10"
+      ADMIN_USERS: ${SALONI_PG_USER:-saloni}
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,options
+      LOG_CONNECTIONS: "0"
+      LOG_DISCONNECTIONS: "0"
+    ports:
+      - "${SALONI_PGBOUNCER_PORT:-6432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U $${DB_USER} -d postgres || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  saloni_pgdata:
